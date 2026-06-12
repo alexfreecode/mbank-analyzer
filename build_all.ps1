@@ -1,21 +1,21 @@
-# build_all.ps1 — полная сборка: .exe (PyInstaller) + установщик (Inno Setup)
+# build_all.ps1 — pelna kompilacja: .exe (PyInstaller) + instalator (Inno Setup)
 #
-# Результат: dist\mBank Analyzer Setup.exe — единственный файл, который
-# нужно передать пользователю для установки программы.
+# Wynik: dist\mBank Analyzer Setup.exe — jedyny plik, ktory trzeba
+# przekazac uzytkownikowi do instalacji programu.
 #
-# Требования:
+# Wymagania:
 #   - pip install pyinstaller pillow
-#   - установленный Inno Setup 6 (winget install JRSoftware.InnoSetup)
+#   - zainstalowany Inno Setup 6 (winget install JRSoftware.InnoSetup)
 
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 Set-Location $root
 
-# ── Шаг 1: собрать автономный .exe ────────────────────────────────────────────
+# ── Krok 1: zbudowac samodzielny .exe ─────────────────────────────────────────
 & "$root\build_exe.ps1"
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
-# ── Шаг 2: найти компилятор Inno Setup ────────────────────────────────────────
+# ── Krok 2: znalezc kompilator Inno Setup ─────────────────────────────────────
 $iscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
 if (-not $iscc) {
     $candidates = @(
@@ -26,22 +26,22 @@ if (-not $iscc) {
     $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 }
 if (-not $iscc) {
-    Write-Host "Не найден компилятор Inno Setup (ISCC.exe)." -ForegroundColor Red
-    Write-Host "Установите Inno Setup: winget install JRSoftware.InnoSetup" -ForegroundColor Yellow
+    Write-Host "Nie znaleziono kompilatora Inno Setup (ISCC.exe)." -ForegroundColor Red
+    Write-Host "Zainstaluj Inno Setup: winget install JRSoftware.InnoSetup" -ForegroundColor Yellow
     exit 1
 }
 
-# ── Шаг 3: скомпилировать установщик ──────────────────────────────────────────
+# ── Krok 3: skompilowac instalator ────────────────────────────────────────────
 Write-Host ""
-Write-Host "==> Собираю установщик через Inno Setup..." -ForegroundColor Cyan
+Write-Host "==> Buduje instalator przez Inno Setup..." -ForegroundColor Cyan
 & "$iscc" "$root\installer.iss"
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "Сборка установщика завершилась с ошибкой." -ForegroundColor Red
+    Write-Host "Kompilacja instalatora zakonczyla sie bledem." -ForegroundColor Red
     exit 1
 }
 
 Write-Host ""
 Write-Host "========================================================" -ForegroundColor Green
-Write-Host " Готово! Файл для раздачи пользователям:" -ForegroundColor Green
+Write-Host " Gotowe! Plik do przekazania uzytkownikom:" -ForegroundColor Green
 Write-Host "   $root\dist\mBank Analyzer Setup.exe" -ForegroundColor Green
 Write-Host "========================================================" -ForegroundColor Green

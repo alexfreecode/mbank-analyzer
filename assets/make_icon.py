@@ -1,4 +1,4 @@
-"""Генерирует простую иконку приложения (app.ico) программно — без внешних файлов."""
+"""Generuje prostą ikonę aplikacji (app.ico) programowo — bez plików zewnętrznych."""
 
 from PIL import Image, ImageDraw
 
@@ -9,16 +9,16 @@ def draw_icon(size: int) -> Image.Image:
     d = ImageDraw.Draw(img)
 
     pad = max(1, size // 16)
-    # Фон — скруглённый прямоугольник в фирменных цветах приложения (синий)
+    # Tło — zaokrąglony prostokąt w firmowych kolorach aplikacji (niebieski)
     d.rounded_rectangle(
         [pad, pad, size - pad, size - pad],
         radius=size // 5,
-        fill=(0, 120, 212, 255),       # #0078d4 — цвет кнопки "Запустить анализ"
+        fill=(0, 120, 212, 255),       # #0078d4 — kolor przycisku „Uruchom analizę”
         outline=(0, 90, 158, 255),
         width=max(1, size // 32),
     )
 
-    # Стилизованный «график/выписка»: несколько горизонтальных полос + galочка
+    # Stylizowany „wykres/wyciąg”: kilka poziomych pasków
     bar_left  = size * 0.28
     bar_right = size * 0.72
     bar_h     = max(1, size // 16)

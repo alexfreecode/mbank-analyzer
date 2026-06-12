@@ -1,6 +1,6 @@
 """
-app.py — GUI-обёртка для анализатора выписки mBank
-Запуск: python app.py  (или pythonw app.py для запуска без консоли)
+app.py — nakładka GUI dla analizatora wyciągu mBank
+Uruchomienie: python app.py  (lub pythonw app.py — bez konsoli)
 """
 
 import json
@@ -10,22 +10,22 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-# Импортируем логику анализа и генерации фактур
+# Importujemy logikę analizy i generowania faktur
 from parser import analyze, print_report, print_reconciliation_report
 from saldeo_export import VAT_BASIS, generate_saldeo_xlsx
 from contractor_check import load_saldeo_contractors, check_clients
 
-# ─── Конфигурация (сохраняется между запусками) ───────────────────────────────
+# ─── Konfiguracja (zachowywana między uruchomieniami) ─────────────────────────
 
 
 def _config_dir() -> Path:
-    """Папка для config.json.
+    """Folder dla config.json.
 
-    При запуске собранного .exe (PyInstaller --onefile) __file__ указывает
-    на временную папку, которая удаляется после выхода — хранить там
-    настройки нельзя. Поэтому для «заморожённого» приложения используем
-    папку профиля пользователя (%APPDATA%), а при запуске обычного .py —
-    папку рядом со скриптом (удобно для разработки).
+    Przy uruchomieniu zbudowanego .exe (PyInstaller --onefile) __file__
+    wskazuje na folder tymczasowy, usuwany po zamknięciu — nie można tam
+    przechowywać ustawień. Dlatego dla „zamrożonej” aplikacji używamy
+    folderu profilu użytkownika (%APPDATA%), a przy uruchomieniu zwykłego
+    .py — folderu obok skryptu (wygodne przy programowaniu).
     """
     if getattr(sys, "frozen", False):
         base = Path(os.environ.get("APPDATA", Path.home()))
@@ -54,7 +54,7 @@ def _save_config(data: dict) -> None:
         pass
 
 
-# ─── Константы ────────────────────────────────────────────────────────────────
+# ─── Stałe ────────────────────────────────────────────────────────────────────
 
 TITLE     = "Analizator wyciągu mBank"
 FONT_MONO = ("Courier New", 10)
@@ -220,18 +220,18 @@ zależą.
 """
 
 
-# ─── Мастер первого запуска (реквизиты продавца) ──────────────────────────────
+# ─── Kreator pierwszego uruchomienia (dane sprzedawcy) ────────────────────────
 
 class SellerSetupDialog(tk.Toplevel):
     """
-    Показывается один раз — при первом запуске программы (когда в config.json
-    ещё нет реквизитов продавца). Запрашивает имя/название продавца, номер
-    банковского счёта и название услуги — эти данные подставляются в
-    генерируемые фактуры Saldeo. Введённое сохраняется локально в config.json
-    и больше никогда не запрашивается.
+    Pokazywany raz — przy pierwszym uruchomieniu programu (gdy w config.json
+    nie ma jeszcze danych sprzedawcy). Pyta o imię/nazwę sprzedawcy, numer
+    rachunku bankowego i nazwę usługi — te dane wstawiane są do generowanych
+    faktur Saldeo. Wpisane wartości zapisywane są lokalnie w config.json
+    i nigdy więcej nie są pytane.
 
-    Благодаря этому в коде программы нет ни одного захардкоженного личного
-    реквизита — программу можно свободно передавать другим пользователям.
+    Dzięki temu w kodzie programu nie ma ani jednej zaszytej na stałe danej
+    osobistej — program można swobodnie przekazywać innym użytkownikom.
     """
 
     def __init__(self, parent: tk.Tk, first_run: bool = True):
@@ -299,7 +299,7 @@ class SellerSetupDialog(tk.Toplevel):
             tk.Button(btn_row, text="Anuluj", font=FONT_BTN, width=10,
                       command=self.destroy).pack(side=tk.LEFT, padx=(10, 0))
 
-        # Центрируем относительно родителя
+        # Wyśrodkowanie względem okna rodzica
         self.update_idletasks()
         pw = parent.winfo_x() + parent.winfo_width()  // 2
         ph = parent.winfo_y() + parent.winfo_height() // 2
@@ -330,30 +330,31 @@ class SellerSetupDialog(tk.Toplevel):
         self.destroy()
 
     def _on_close(self):
-        # Не запираем пользователя — но без реквизитов кнопка генерации
-        # фактур просто будет подставлять пустые значения, пока пользователь
-        # не заполнит их (можно открыть мастер повторно, перезапустив программу
-        # после удаления seller_name/seller_account из config.json).
+        # Nie zamykamy użytkownika na siłę — ale bez danych sprzedawcy
+        # generowanie faktur będzie po prostu wstawiać puste wartości,
+        # dopóki ich nie uzupełni (kreator można otworzyć ponownie,
+        # restartując program po usunięciu seller_name/seller_account
+        # z config.json).
         self.destroy()
 
 
-# ─── Диалог «Похожие контрагенты в базе Saldeo» ───────────────────────────────
+# ─── Okno „Podobni kontrahenci w bazie Saldeo” ────────────────────────────────
 
 class ContractorMatchDialog(tk.Toplevel):
     """
-    Модальное окно разрешения «подозрительно похожих» совпадений с базой
-    контрагентов Saldeo.
+    Modalne okno rozstrzygania „podejrzanie podobnych” dopasowań do bazy
+    kontrahentów Saldeo.
 
-    Для каждой пары (имя из выписки ↔ похожее имя из базы Saldeo) пользователь
-    решает: это один и тот же человек или нет.
-      • Если «да» — в фактуре будет использовано имя ИЗ БАЗЫ SALDEO, чтобы
-        Saldeo при импорте подвязал фактуру к существующей карточке контрагента
-        (а не создал дублирующую).
-      • Если «нет» — имя останется как в выписке (будет создана новая карточка).
+    Dla każdej pary (nazwa z wyciągu ↔ podobna nazwa z bazy Saldeo) użytkownik
+    decyduje: to ta sama osoba czy nie.
+      • Jeśli „tak” — w fakturze zostanie użyta nazwa Z BAZY SALDEO, aby
+        Saldeo przy imporcie podpięło fakturę pod istniejącą kartę kontrahenta
+        (a nie utworzyło zduplikowanej).
+      • Jeśli „nie” — nazwa pozostanie jak w wyciągu (powstanie nowa karta).
 
-    Результат — self.result:
-      dict {имя_из_выписки: имя_из_базы_Saldeo} только для подтверждённых пар,
-      либо None, если пользователь нажал «Anuluj» (генерацию следует отменить).
+    Wynik — self.result:
+      dict {nazwa_z_wyciągu: nazwa_z_bazy_Saldeo} tylko dla potwierdzonych par,
+      albo None, gdy użytkownik kliknął „Anuluj” (generowanie należy przerwać).
     """
 
     def __init__(self, parent: tk.Tk, matches: list[dict]):
@@ -437,10 +438,10 @@ class ContractorMatchDialog(tk.Toplevel):
         self.destroy()
 
 
-# ─── Диалог «Pomoc» ───────────────────────────────────────────────────────────
+# ─── Okno „Pomoc” ─────────────────────────────────────────────────────────────
 
 class HelpDialog(tk.Toplevel):
-    """Окно справки — показывает HELP_TEXT в прокручиваемом текстовом поле."""
+    """Okno pomocy — pokazuje HELP_TEXT w przewijanym polu tekstowym."""
 
     def __init__(self, parent: tk.Tk):
         super().__init__(parent)
@@ -466,18 +467,18 @@ class HelpDialog(tk.Toplevel):
         tk.Button(outer, text="Zamknij", font=FONT_BTN, width=12,
                   command=self.destroy).pack(pady=(10, 0))
 
-        # Центрируем относительно родителя
+        # Wyśrodkowanie względem okna rodzica
         self.update_idletasks()
         pw = parent.winfo_x() + parent.winfo_width()  // 2
         ph = parent.winfo_y() + parent.winfo_height() // 2
         self.geometry(f"+{pw - self.winfo_width()//2}+{ph - self.winfo_height()//2}")
 
 
-# ─── Диалог «Kontrola kompletności wyciągu» ───────────────────────────────────
+# ─── Okno „Kontrola kompletności wyciągu” ─────────────────────────────────────
 
 class ReconciliationDialog(tk.Toplevel):
-    """Окно отдельного отчёта «Kontrola kompletności» —
-    разбивка ВСЕХ операций выписки на Klienci / Pozostałe wpływy / Wydatki."""
+    """Okno osobnego raportu „Kontrola kompletności” —
+    podział WSZYSTKICH operacji wyciągu na Klienci / Pozostałe wpływy / Wydatki."""
 
     def __init__(self, parent: tk.Tk, report_text: str, default_dir: str, default_name: str):
         super().__init__(parent)
@@ -513,7 +514,7 @@ class ReconciliationDialog(tk.Toplevel):
         tk.Button(btn_row, text="Zamknij", font=FONT_BTN, width=12,
                   command=self.destroy).pack(side=tk.LEFT)
 
-        # Центрируем относительно родителя
+        # Wyśrodkowanie względem okna rodzica
         self.update_idletasks()
         pw = parent.winfo_x() + parent.winfo_width()  // 2
         ph = parent.winfo_y() + parent.winfo_height() // 2
@@ -535,10 +536,10 @@ class ReconciliationDialog(tk.Toplevel):
             messagebox.showwarning("Nie udało się zapisać pliku", str(exc))
 
 
-# ─── Диалог «Генерация фактур Saldeo» ─────────────────────────────────────────
+# ─── Okno „Generowanie faktur Saldeo” ─────────────────────────────────────────
 
 class SaldeoDialog(tk.Toplevel):
-    """Модальное окно для настройки и генерации Excel-импорта Saldeo."""
+    """Modalne okno konfiguracji i generowania pliku Excel importu Saldeo."""
 
     def __init__(self, parent: tk.Tk, df):
         super().__init__(parent)
@@ -555,7 +556,7 @@ class SaldeoDialog(tk.Toplevel):
 
         self._build_ui()
 
-        # Центрируем относительно родителя
+        # Wyśrodkowanie względem okna rodzica
         self.update_idletasks()
         pw = parent.winfo_x() + parent.winfo_width()  // 2
         ph = parent.winfo_y() + parent.winfo_height() // 2
@@ -563,13 +564,13 @@ class SaldeoDialog(tk.Toplevel):
 
         self.wait_window()
 
-    # ── Построение интерфейса ──────────────────────────────────────────────────
+    # ── Budowa interfejsu ──────────────────────────────────────────────────────
 
     def _build_ui(self):
         outer = tk.Frame(self, bg="#f0f0f0", padx=14, pady=12)
         outer.pack(fill=tk.BOTH, expand=True)
 
-        # ── Список клиентов ──
+        # ── Lista klientów ──
         tk.Label(outer, text="Klienci do uwzględnienia w fakturach:",
                  font=FONT_UI, bg="#f0f0f0").pack(anchor="w")
 
@@ -588,7 +589,7 @@ class SaldeoDialog(tk.Toplevel):
         canvas.pack(side=tk.LEFT,  fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Заполняем список клиентов; снятые ранее — восстанавливаем из конфига
+        # Wypełniamy listę klientów; wcześniej odznaczonych przywracamy z konfiguracji
         saved_excluded = set(_load_config().get("excluded_clients", []))
         all_clients = sorted(self._df["name"].unique())
         for client in all_clients:
@@ -601,7 +602,7 @@ class SaldeoDialog(tk.Toplevel):
             tk.Checkbutton(row, text=client, variable=var,
                            bg="white", font=FONT_UI, anchor="w").pack(side=tk.LEFT)
 
-        # Кнопки «Выделить всё / Снять всё»
+        # Przyciski „Zaznacz wszystko / Odznacz wszystko”
         btn_row = tk.Frame(outer, bg="#f0f0f0")
         btn_row.pack(fill=tk.X, pady=(0, 10))
         tk.Button(btn_row, text="Zaznacz wszystko",   font=FONT_BTN, width=14,
@@ -610,7 +611,7 @@ class SaldeoDialog(tk.Toplevel):
                   command=lambda: self._toggle_all(False)).pack(side=tk.LEFT,
                                                                 padx=(6, 0))
 
-        # ── Начальный номер фактуры ──
+        # ── Początkowy numer faktury ──
         num_row = tk.Frame(outer, bg="#f0f0f0")
         num_row.pack(fill=tk.X, pady=(0, 8))
 
@@ -636,7 +637,7 @@ class SaldeoDialog(tk.Toplevel):
                      state="readonly", width=8,
                      font=FONT_UI).pack(side=tk.LEFT, padx=(8, 0))
 
-        # ── Sprawdzenie z bazą kontrahentów Saldeo (opcjonalnie) ──
+        # ── Porównanie z bazą kontrahentów Saldeo (opcjonalnie) ──
         tk.Label(outer, text="Baza kontrahentów Saldeo — plik CSV (opcjonalnie):",
                  font=FONT_UI, bg="#f0f0f0").pack(anchor="w")
 
@@ -657,7 +658,7 @@ class SaldeoDialog(tk.Toplevel):
                  font=("Segoe UI", 8), fg="#666666", bg="#f0f0f0",
                  justify="left").pack(anchor="w", pady=(0, 10))
 
-        # ── Выходной файл ──
+        # ── Plik wyjściowy ──
         tk.Label(outer, text="Plik wyjściowy Excel (.xlsx):",
                  font=FONT_UI, bg="#f0f0f0").pack(anchor="w")
 
@@ -670,7 +671,7 @@ class SaldeoDialog(tk.Toplevel):
         tk.Button(out_row, text="Zapisz...", font=FONT_BTN, width=12,
                   command=self._browse_output).pack(side=tk.LEFT, padx=(6, 0))
 
-        # ── Кнопки действий ──
+        # ── Przyciski akcji ──
         action_row = tk.Frame(outer, bg="#f0f0f0")
         action_row.pack(pady=(4, 0))
 
@@ -685,7 +686,7 @@ class SaldeoDialog(tk.Toplevel):
         tk.Button(action_row, text="Anuluj", font=FONT_BTN, width=10,
                   command=self.destroy).pack(side=tk.LEFT, padx=(10, 0))
 
-    # ── Обработчики ────────────────────────────────────────────────────────────
+    # ── Obsługa zdarzeń ────────────────────────────────────────────────────────
 
     def _toggle_all(self, state: bool):
         for var in self._client_vars.values():
@@ -714,7 +715,7 @@ class SaldeoDialog(tk.Toplevel):
             messagebox.showerror("Błąd", "Podaj ścieżkę zapisu pliku.",
                                  parent=self)
             return
-        # Добавляем .xlsx если расширение не указано
+        # Dodajemy .xlsx, gdy nie podano rozszerzenia
         if not Path(out_path).suffix:
             out_path += ".xlsx"
             self.out_var.set(out_path)
@@ -724,14 +725,14 @@ class SaldeoDialog(tk.Toplevel):
         vat_basis = self.vat_basis_var.get().strip()
         contractors_csv = self.contractors_csv_var.get().strip()
 
-        # Сохраняем настройки для следующего запуска
+        # Zapisujemy ustawienia na następne uruchomienie
         cfg = _load_config()
         cfg["vat_basis"]               = vat_basis
-        cfg["excluded_clients"]        = sorted(excluded)   # снятые галочки
+        cfg["excluded_clients"]        = sorted(excluded)   # odznaczone pola
         cfg["saldeo_contractors_csv"]  = contractors_csv
         _save_config(cfg)
 
-        # ── Сверка со справочником контрагентов Saldeo (если указан файл) ──
+        # ── Porównanie z bazą kontrahentów Saldeo (gdy wskazano plik) ──
         contractor_warnings: list[str] = []
         name_overrides: dict[str, str] = {}
         if contractors_csv:
@@ -751,14 +752,14 @@ class SaldeoDialog(tk.Toplevel):
                     similar = [r for r in check_results if r["status"] == "similar"]
                     new     = [r for r in check_results if r["status"] == "new"]
 
-                    # Подозрительно похожие имена — отдаём решение пользователю:
-                    # «это тот же контрагент?» → если да, в фактуре будет
-                    # использовано имя из базы Saldeo (как в справочнике),
-                    # чтобы не создавать дублирующую карточку.
+                    # Podejrzanie podobne nazwy — decyzję podejmuje użytkownik:
+                    # „czy to ten sam kontrahent?” → jeśli tak, w fakturze
+                    # zostanie użyta nazwa z bazy Saldeo (jak w bazie),
+                    # by nie tworzyć zduplikowanej karty.
                     if similar:
                         dlg = ContractorMatchDialog(self, similar)
                         if dlg.result is None:
-                            return  # пользователь нажал «Anuluj» — отменяем генерацию
+                            return  # użytkownik kliknął „Anuluj” — przerywamy generowanie
                         name_overrides = dlg.result
 
                     for r in similar:
@@ -815,7 +816,7 @@ class SaldeoDialog(tk.Toplevel):
         self.destroy()
 
 
-# ─── Главное окно ──────────────────────────────────────────────────────────────
+# ─── Okno główne ───────────────────────────────────────────────────────────────
 
 class App(tk.Tk):
     def __init__(self):
@@ -824,33 +825,33 @@ class App(tk.Tk):
         self.resizable(True, True)
         self.minsize(640, 480)
 
-        # Центрируем окно на экране
+        # Wyśrodkowanie okna na ekranie
         self.update_idletasks()
         x = (self.winfo_screenwidth()  - WIN_W) // 2
         y = (self.winfo_screenheight() - WIN_H) // 2
         self.geometry(f"{WIN_W}x{WIN_H}+{x}+{y}")
 
-        self._df = None   # результат последнего анализа
+        self._df = None   # wynik ostatniej analizy
 
         self._build_ui()
 
-        # Мастер первого запуска: если реквизиты продавца ещё не сохранены
-        # в config.json — запрашиваем их один раз перед началом работы.
+        # Kreator pierwszego uruchomienia: gdy dane sprzedawcy nie są jeszcze
+        # zapisane w config.json — pytamy o nie raz, przed rozpoczęciem pracy.
         cfg = _load_config()
         if not cfg.get("seller_name") or not cfg.get("seller_account"):
             self.update_idletasks()
             SellerSetupDialog(self, first_run=True)
 
-    # ── Построение интерфейса ──────────────────────────────────────────────────
+    # ── Budowa interfejsu ──────────────────────────────────────────────────────
 
     def _build_ui(self):
         self.configure(bg="#f0f0f0")
 
-        # ── Панель управления (верх) ──
+        # ── Panel sterowania (góra) ──
         ctrl = tk.Frame(self, bg="#f0f0f0", padx=PAD, pady=PAD)
         ctrl.pack(fill=tk.X)
 
-        # Входной файл
+        # Plik wejściowy
         tk.Label(ctrl, text="Plik wejściowy CSV:", font=FONT_UI,
                  bg="#f0f0f0").grid(row=0, column=0, sticky="w", pady=(0, 2))
 
@@ -861,7 +862,7 @@ class App(tk.Tk):
         tk.Button(ctrl, text="Wybierz...", font=FONT_BTN, width=12,
                   command=self._browse_input).grid(row=1, column=1)
 
-        # Выходной файл TXT
+        # Plik wyjściowy TXT
         tk.Label(ctrl, text="Plik wyjściowy TXT (opcjonalnie):", font=FONT_UI,
                  bg="#f0f0f0").grid(row=2, column=0, sticky="w", pady=(PAD, 2))
 
@@ -872,7 +873,7 @@ class App(tk.Tk):
         tk.Button(ctrl, text="Zapisz...", font=FONT_BTN, width=12,
                   command=self._browse_output).grid(row=3, column=1)
 
-        # Кодировка
+        # Kodowanie
         enc_row = tk.Frame(ctrl, bg="#f0f0f0")
         enc_row.grid(row=4, column=0, columnspan=2, sticky="w", pady=(PAD, 0))
 
@@ -884,7 +885,7 @@ class App(tk.Tk):
                      state="readonly", width=12,
                      font=FONT_UI).pack(side=tk.LEFT, padx=(8, 0))
 
-        # ── Кнопки действий ──
+        # ── Przyciski akcji ──
         btn_row = tk.Frame(ctrl, bg="#f0f0f0")
         btn_row.grid(row=5, column=0, columnspan=2, pady=(PAD + 4, 0))
 
@@ -934,10 +935,10 @@ class App(tk.Tk):
 
         ctrl.columnconfigure(0, weight=1)
 
-        # ── Разделитель ──
+        # ── Separator ──
         ttk.Separator(self, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=PAD, pady=2)
 
-        # ── Текстовое поле результата ──
+        # ── Pole tekstowe wyniku ──
         result_frame = tk.Frame(self, bg="#f0f0f0")
         result_frame.pack(fill=tk.BOTH, expand=True, padx=PAD, pady=(0, 4))
 
@@ -954,13 +955,13 @@ class App(tk.Tk):
         )
         self.result_text.pack(fill=tk.BOTH, expand=True)
 
-        # Горизонтальный скроллбар
+        # Poziomy pasek przewijania
         h_scroll = tk.Scrollbar(result_frame, orient=tk.HORIZONTAL,
                                  command=self.result_text.xview)
         h_scroll.pack(fill=tk.X)
         self.result_text.configure(xscrollcommand=h_scroll.set)
 
-        # ── Статус-бар ──
+        # ── Pasek stanu ──
         self.status_var = tk.StringVar(
             value="Wybierz plik z listą operacji i kliknij «Uruchom analizę»"
                   "   •   ☕ Spodobał się program? → zakładka „Pomoc”")
@@ -969,7 +970,7 @@ class App(tk.Tk):
                  anchor="w", padx=PAD, pady=3,
                  relief=tk.SUNKEN).pack(fill=tk.X, side=tk.BOTTOM)
 
-    # ── Обработчики кнопок ─────────────────────────────────────────────────────
+    # ── Obsługa przycisków ─────────────────────────────────────────────────────
 
     def _browse_input(self):
         path = filedialog.askopenfilename(
@@ -1031,7 +1032,7 @@ class App(tk.Tk):
             self.status_var.set("Błąd — zobacz komunikat powyżej")
             return
 
-        # Отображаем в текстовом поле
+        # Wyświetlamy w polu tekstowym
         report_text = "\n".join(output_lines)
         self.result_text.configure(state=tk.NORMAL)
         self.result_text.delete("1.0", tk.END)
@@ -1039,7 +1040,7 @@ class App(tk.Tk):
         self.result_text.configure(state=tk.DISABLED)
         self.result_text.see("1.0")
 
-        # Сохраняем в файл
+        # Zapis do pliku
         saved_msg = ""
         if output_path:
             try:
@@ -1048,13 +1049,13 @@ class App(tk.Tk):
             except OSError as exc:
                 messagebox.showwarning("Nie udało się zapisać pliku", str(exc))
 
-        # Сохраняем результат и разблокируем кнопку Saldeo
+        # Zapamiętujemy wynik i odblokowujemy przycisk Saldeo
         self._df = df
         self._saldeo_btn.configure(
             state=tk.NORMAL if not df.empty else tk.DISABLED
         )
 
-        # Статус-бар
+        # Pasek stanu
         if df.empty:
             self.status_var.set("Nie znaleziono płatności od osób fizycznych")
         else:
@@ -1102,16 +1103,16 @@ class App(tk.Tk):
         SaldeoDialog(self, self._df)
 
     def _open_seller_settings(self):
-        """Открывает окно редактирования реквизитов продавца —
-        доступно в любой момент, не только при первом запуске."""
+        """Otwiera okno edycji danych sprzedawcy —
+        dostępne w każdej chwili, nie tylko przy pierwszym uruchomieniu."""
         SellerSetupDialog(self, first_run=False)
 
     def _open_help(self):
-        """Открывает окно встроенной справки пользователя."""
+        """Otwiera okno wbudowanej pomocy użytkownika."""
         HelpDialog(self)
 
 
-# ─── Точка входа ──────────────────────────────────────────────────────────────
+# ─── Punkt wejścia ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     app = App()

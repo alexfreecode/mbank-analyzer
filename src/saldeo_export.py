@@ -1,7 +1,7 @@
 """
-saldeo_export.py — Генерация Excel-файла импорта счетов-фактур для Saldeo Smart.
+saldeo_export.py — generowanie pliku Excel importu faktur dla Saldeo Smart.
 
-Использование:
+Użycie:
     from saldeo_export import generate_saldeo_xlsx
     path, warnings = generate_saldeo_xlsx(df, "faktury.xlsx", start_inv_num=9)
 """
@@ -15,27 +15,27 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 
-# ── Реквизиты продавца ────────────────────────────────────────────────────────
-# Личные данные продавца (имя, счёт, название услуги) НЕ хранятся в коде —
-# пользователь вводит их один раз в мастере первого запуска, и они
-# сохраняются в config.json. Здесь — только нейтральные значения по
-# умолчанию на случай, если функция вызвана без явных параметров.
+# ── Dane sprzedawcy ───────────────────────────────────────────────────────────
+# Dane osobiste sprzedawcy (nazwa, konto, nazwa usługi) NIE są przechowywane
+# w kodzie — użytkownik podaje je raz w kreatorze pierwszego uruchomienia
+# i zapisywane są w config.json. Tutaj — jedynie neutralne wartości
+# domyślne na wypadek wywołania funkcji bez jawnych parametrów.
 
 SELLER_NAME    = ""
 SELLER_ACCOUNT = ""
 
 SERVICE_NAME   = "Usługa"
 VAT_RATE       = "zw."
-VAT_BASIS      = "a113"   # Допустимые значения: a43, a113, a82, du, iz
+VAT_BASIS      = "a113"   # Dozwolone wartości: a43, a113, a82, du, iz
 PAYMENT_METHOD = "przelew"
 UNIT           = "szt."
 CURRENCY       = "PLN"
 COUNTRY        = "PL"
 
-# По умолчанию никто не исключён — пользователь снимает галочки сам
+# Domyślnie nikt nie jest wykluczony — użytkownik sam odznacza pola wyboru
 DEFAULT_EXCLUDE: set[str] = set()
 
-# Порядок колонок шаблона Saldeo (50 штук) — важен для импорта
+# Kolejność kolumn szablonu Saldeo (50 sztuk) — istotna dla importu
 SALDEO_COLUMNS = [
     "Lp.",
     "Sufiks",
@@ -90,16 +90,16 @@ SALDEO_COLUMNS = [
 ]
 
 
-# ── Вспомогательные функции ───────────────────────────────────────────────────
+# ── Funkcje pomocnicze ────────────────────────────────────────────────────────
 
 def _last_day_of_month(d: date) -> date:
-    """Последний день месяца для даты d."""
+    """Ostatni dzień miesiąca dla daty d."""
     last = calendar.monthrange(d.year, d.month)[1]
     return d.replace(day=last)
 
 
 def _parse_date(s: str) -> date:
-    """Парсит строку даты 'YYYY-MM-DD' или 'DD.MM.YYYY'."""
+    """Parsuje tekst daty 'YYYY-MM-DD' lub 'DD.MM.YYYY'."""
     s = s.strip()
     try:
         return date.fromisoformat(s)          # YYYY-MM-DD
@@ -108,7 +108,7 @@ def _parse_date(s: str) -> date:
         return date(int(yr), int(mon), int(day))
 
 
-# ── Основная функция ──────────────────────────────────────────────────────────
+# ── Funkcja główna ────────────────────────────────────────────────────────────
 
 def generate_saldeo_xlsx(
     df: pd.DataFrame,
@@ -122,34 +122,34 @@ def generate_saldeo_xlsx(
     service_name: str | None = None,
 ) -> tuple[str, list[str]]:
     """
-    Генерирует Excel-файл импорта фактур для Saldeo Smart.
+    Generuje plik Excel importu faktur dla Saldeo Smart.
 
     Parameters
     ----------
-    df             : DataFrame с колонками date, name, amount, title
-                     (результат parser.analyze())
-    output_path    : путь для сохранения .xlsx
-    start_inv_num  : номер первой фактуры (Lp. в файле)
-    exclude_names  : имена клиентов для исключения; None → DEFAULT_EXCLUDE
-    name_overrides : сопоставление {имя_из_выписки: каноническое_имя_из_Saldeo} —
-                     применяется ПОСЛЕ исключения клиентов; позволяет привести
-                     написание имени к тому, что уже есть в справочнике
-                     контрагентов Saldeo, и тем самым избежать создания
-                     дублирующей карточки контрагента при импорте.
-                     None → подмена не выполняется
-    vat_basis      : текст поля «Podstawa zastosowania stawki ZW»;
-                     None → VAT_BASIS (константа)
-    seller_name    : имя/название продавца («Wystawca faktury»);
-                     None → SELLER_NAME (константа)
-    seller_account : номер банковского счёта продавца;
-                     None → SELLER_ACCOUNT (константа)
-    service_name   : название услуги («Nazwa towaru»);
-                     None → SERVICE_NAME (константа)
+    df             : DataFrame z kolumnami date, name, amount, title
+                     (wynik parser.analyze())
+    output_path    : ścieżka zapisu pliku .xlsx
+    start_inv_num  : numer pierwszej faktury (Lp. w pliku)
+    exclude_names  : nazwy klientów do wykluczenia; None → DEFAULT_EXCLUDE
+    name_overrides : mapowanie {nazwa_z_wyciągu: nazwa_kanoniczna_z_Saldeo} —
+                     stosowane PO wykluczeniu klientów; pozwala sprowadzić
+                     zapis nazwy do postaci już istniejącej w bazie
+                     kontrahentów Saldeo i tym samym uniknąć utworzenia
+                     zduplikowanej karty kontrahenta przy imporcie.
+                     None → bez podmiany
+    vat_basis      : tekst pola „Podstawa zastosowania stawki ZW”;
+                     None → VAT_BASIS (stała)
+    seller_name    : imię/nazwa sprzedawcy („Wystawca faktury”);
+                     None → SELLER_NAME (stała)
+    seller_account : numer rachunku bankowego sprzedawcy;
+                     None → SELLER_ACCOUNT (stała)
+    service_name   : nazwa usługi („Nazwa towaru”);
+                     None → SERVICE_NAME (stała)
 
     Returns
     -------
     (output_path, warnings_list)
-      warnings_list — список строк предупреждений (может быть пустым)
+      warnings_list — lista tekstów ostrzeżeń (może być pusta)
     """
     if exclude_names is None:
         exclude_names = DEFAULT_EXCLUDE
@@ -162,12 +162,12 @@ def generate_saldeo_xlsx(
     if service_name is None:
         service_name = SERVICE_NAME
 
-    # Фильтруем исключённых клиентов
+    # Filtrujemy wykluczonych klientów
     df = df[~df["name"].isin(exclude_names)].copy()
 
-    # Приводим написание имён к каноническому виду из справочника Saldeo
-    # (применяется только к оставшимся, невыключенным клиентам — порядок важен:
-    # пользователь исключает клиентов по исходным именам из выписки).
+    # Sprowadzamy zapis nazw do postaci kanonicznej z bazy Saldeo
+    # (stosowane tylko do pozostałych, niewykluczonych klientów — kolejność
+    # ma znaczenie: użytkownik wyklucza klientów po nazwach z wyciągu).
     if name_overrides:
         df["name"] = df["name"].replace(name_overrides)
 
@@ -176,17 +176,17 @@ def generate_saldeo_xlsx(
             "Brak klientów do wygenerowania faktur (wszyscy wykluczeni lub brak danych)."
         ]
 
-    # Разбираем даты в объекты date
+    # Parsujemy daty na obiekty date
     df["_date_obj"] = df["date"].apply(_parse_date)
 
-    # Дата выставления = последний день месяца из данных
+    # Data wystawienia = ostatni dzień miesiąca z danych
     issue_date = _last_day_of_month(df["_date_obj"].max())
 
     rows: list[dict] = []
     warnings_list: list[str] = []
     inv_num = start_inv_num
 
-    # Клиенты в хронологическом порядке первого платежа
+    # Klienci w kolejności chronologicznej pierwszej wpłaty
     first_dates = df.groupby("name")["_date_obj"].min()
     clients_ordered = first_dates.sort_values().index.tolist()
 
@@ -196,11 +196,11 @@ def generate_saldeo_xlsx(
         first_dt  = grp["_date_obj"].min()
         last_dt   = grp["_date_obj"].max()
 
-        # Data dostawy — одна дата (последний платёж).
-        # Saldeo не принимает диапазон дат в этом поле.
+        # Data dostawy — jedna data (ostatnia wpłata).
+        # Saldeo nie przyjmuje zakresu dat w tym polu.
         data_dostawy = last_dt.strftime("%d.%m.%Y")
 
-        # Количество и цена: одинаковые суммы → кол-во × цена; разные → 1 × сумма
+        # Ilość i cena: jednakowe kwoty → ilość × cena; różne → 1 × suma
         unique_amounts = set(amounts)
         if len(unique_amounts) == 1:
             ilosc = len(amounts)
@@ -218,7 +218,7 @@ def generate_saldeo_xlsx(
 
         row = dict.fromkeys(SALDEO_COLUMNS, "")
         row["Lp."]                                  = inv_num
-        # Адрес: берём из первой строки, где он есть; иначе "-"
+        # Adres: bierzemy z pierwszego wiersza, w którym występuje; inaczej "-"
         def _first_nonempty(series):
             for v in series:
                 if v and str(v).strip():
@@ -243,7 +243,7 @@ def generate_saldeo_xlsx(
         row["Ilość"]                                = ilosc
         row["Jednostka"]                            = UNIT
         row["Cena jedn. netto"]                     = cena
-        # Cena jedn. brutto — оставляем пустой: Saldeo принимает либо netto, либо brutto
+        # Cena jedn. brutto — zostawiamy pustą: Saldeo przyjmuje albo netto, albo brutto
         row["Stawka VAT"]                           = VAT_RATE
         row["Podstawa zastosowania stawki ZW"]      = vat_basis
         row["Forma płatności"]                      = PAYMENT_METHOD
@@ -254,12 +254,12 @@ def generate_saldeo_xlsx(
         rows.append(row)
         inv_num += 1
 
-    # ── Создаём Excel ─────────────────────────────────────────────────────────
+    # ── Tworzymy plik Excel ───────────────────────────────────────────────────
     wb = Workbook()
     ws = wb.active
     ws.title = "Faktury"
 
-    # Заголовок
+    # Nagłówek
     ws.append(SALDEO_COLUMNS)
     hdr_font  = Font(bold=True)
     hdr_fill  = PatternFill("solid", fgColor="BDD7EE")
@@ -270,7 +270,7 @@ def generate_saldeo_xlsx(
         cell.fill      = hdr_fill
         cell.alignment = hdr_align
 
-    # Данные
+    # Dane
     data_align = Alignment(vertical="center")
     for row in rows:
         ws.append([row[c] for c in SALDEO_COLUMNS])
@@ -278,12 +278,12 @@ def generate_saldeo_xlsx(
         for cell in ws[row_idx]:
             cell.alignment = data_align
 
-    # Автоширина (не шире 40 символов)
+    # Automatyczna szerokość (maks. 40 znaków)
     for col in ws.columns:
         width = max(len(str(cell.value or "")) for cell in col)
         ws.column_dimensions[col[0].column_letter].width = min(width + 2, 40)
 
-    # Закрепляем первую строку
+    # Blokujemy pierwszy wiersz
     ws.freeze_panes = "A2"
 
     wb.save(output_path)

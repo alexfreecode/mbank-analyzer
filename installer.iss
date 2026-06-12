@@ -1,19 +1,20 @@
-; installer.iss — скрипт Inno Setup для сборки установщика mBank Analyzer
+; installer.iss — skrypt Inno Setup budujący instalator mBank Analyzer
 ;
-; Собрать установщик:
-;   1) Сначала выполнить build_exe.ps1 — получить dist\mBank Analyzer.exe
-;   2) Затем скомпилировать этот файл компилятором Inno Setup (ISCC.exe installer.iss)
+; Budowanie instalatora:
+;   1) Najpierw uruchomić build_exe.ps1 — powstanie dist\mBank Analyzer.exe
+;   2) Następnie skompilować ten plik kompilatorem Inno Setup (ISCC.exe installer.iss)
 ;
-; Результат: dist\mBank Analyzer Setup.exe — один файл для раздачи пользователям.
+; Wynik: dist\mBank Analyzer Setup.exe — jeden plik do przekazywania użytkownikom.
 ;
-; Установка идёт в папку профиля пользователя (без прав администратора),
-; создаётся ярлык в "Пуск" и (по желанию) на рабочем столе, регистрируется
-; в "Установка и удаление программ" с полноценным удалением.
+; Instalacja przebiega w folderze profilu użytkownika (bez uprawnień
+; administratora), tworzony jest skrót w menu Start i (opcjonalnie) na
+; pulpicie, program rejestruje się w „Dodaj/usuń programy” z pełną
+; obsługą odinstalowania.
 
 #define MyAppName "mBank Analyzer"
 #define MyAppVersion "1.0"
-; Нейтральное название издателя — никаких личных имён в установщике
-; (программа должна быть свободно передаваемой без чьих-либо личных данных)
+; Neutralna nazwa wydawcy — żadnych danych osobistych w instalatorze
+; (program ma być swobodnie przekazywalny, bez niczyich danych osobowych)
 #define MyAppPublisher "mBank Analyzer"
 #define MyAppExeName "mBank Analyzer.exe"
 
@@ -23,8 +24,8 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
-; Устанавливаем без прав администратора — в папку текущего пользователя,
-; чтобы неподготовленный пользователь не столкнулся с запросом UAC
+; Instalujemy bez uprawnień administratora — w folderze bieżącego użytkownika,
+; aby niedoświadczony użytkownik nie natknął się na monit UAC
 PrivilegesRequired=lowest
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
@@ -50,19 +51,19 @@ Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-; Имя ярлыка на рабочем столе вычисляется динамически (см. [Code] ниже) —
-; чтобы не затереть уже существующий ярлык с тем же именем, который мог
-; быть создан вручную и указывать на что-то другое (например, на dev-версию
-; программы, запускаемую напрямую из исходников).
+; Nazwa skrótu na pulpicie wyliczana jest dynamicznie (patrz [Code] niżej) —
+; aby nie nadpisać już istniejącego skrótu o tej samej nazwie, który mógł
+; zostać utworzony ręcznie i wskazywać na coś innego (np. na wersję
+; deweloperską programu uruchamianą bezpośrednio ze źródeł).
 Name: "{autodesktop}\{code:GetDesktopIconName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
-// Возвращает путь, на который указывает существующий .lnk-файл (через COM
-// WScript.Shell — тот же механизм, которым PowerShell читает ярлыки).
-// Если прочитать не удалось — возвращает пустую строку.
+// Zwraca ścieżkę, na którą wskazuje istniejący plik .lnk (przez COM
+// WScript.Shell — ten sam mechanizm, którym PowerShell czyta skróty).
+// Gdy odczyt się nie powiedzie — zwraca pusty tekst.
 function GetShortcutTarget(LinkFile: String): String;
 var
   WshShell: Variant;
@@ -78,13 +79,13 @@ begin
   end;
 end;
 
-// Подбирает имя для ярлыка на рабочем столе (без расширения .lnk):
-//   - "mBank Analyzer", если файла с таким именем ещё нет;
-//   - то же имя, если существующий ярлык указывает внутрь папки установки
-//     этой программы — значит, это переустановка/обновление, и его
-//     безопасно перезаписать;
-//   - "mBank Analyzer (1)", "(2)", ... если по этому имени уже лежит
-//     ЧУЖОЙ ярлык (указывающий куда-то ещё) — чтобы его не затереть.
+// Dobiera nazwę dla skrótu na pulpicie (bez rozszerzenia .lnk):
+//   - "mBank Analyzer", jeśli pliku o tej nazwie jeszcze nie ma;
+//   - ta sama nazwa, jeśli istniejący skrót wskazuje do wnętrza folderu
+//     instalacji tego programu — to znaczy reinstalacja/aktualizacja
+//     i można go bezpiecznie nadpisać;
+//   - "mBank Analyzer (1)", "(2)", ... jeśli pod tą nazwą leży już
+//     OBCY skrót (wskazujący gdzie indziej) — aby go nie nadpisać.
 function GetDesktopIconName(Param: String): String;
 var
   BaseName, CandidateName, LinkPath, Target, AppDir: String;
@@ -104,7 +105,7 @@ begin
 
     Target := GetShortcutTarget(LinkPath);
     if (Target <> '') and (Pos(Lowercase(AppDir), Lowercase(Target)) > 0) then
-      Break; // это наш собственный ярлык от предыдущей установки — переиспользуем имя
+      Break; // to nasz własny skrót z poprzedniej instalacji — używamy tej nazwy
 
     CandidateName := BaseName + ' (' + IntToStr(I) + ')';
     I := I + 1;
@@ -112,10 +113,10 @@ begin
   Result := CandidateName;
 end;
 
-// После удаления файлов программы предлагаем также очистить папку с настройками.
-// Папка %APPDATA%\mBank Analyzer содержит config.json с реквизитами продавца
-// и другими пользовательскими настройками — деинсталлятор её не трогает
-// по умолчанию, чтобы настройки сохранились при переустановке/обновлении.
+// Po usunięciu plików programu proponujemy także wyczyszczenie folderu ustawień.
+// Folder %APPDATA%\mBank Analyzer zawiera config.json z danymi sprzedawcy
+// i innymi ustawieniami użytkownika — deinstalator domyślnie go nie rusza,
+// aby ustawienia przetrwały reinstalację/aktualizację.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   AppDataDir: String;

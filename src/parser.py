@@ -1,6 +1,6 @@
 """
-parser.py — Анализатор банковской выписки mBank
-Группирует входящие платежи от физических лиц по клиенту.
+parser.py — Analizator wyciągu bankowego mBank
+Grupuje wpłaty przychodzące od osób fizycznych według klienta.
 """
 
 import argparse
@@ -17,20 +17,20 @@ except ImportError:
     HAS_TABULATE = False
 
 
-# ─── Константы ────────────────────────────────────────────────────────────────
+# ─── Stałe ────────────────────────────────────────────────────────────────────
 
 HEADER_MARKER = "#Data operacji"
 
-# Корень для определения входящих переводов.
-# Все польские типы входящих операций содержат "przychodzący" (входящий):
+# Rdzeń do rozpoznawania przelewów przychodzących.
+# Wszystkie polskie typy operacji przychodzących zawierają „przychodzący”:
 #   PRZELEW ZEWNĘTRZNY/WEWNĘTRZNY PRZYCHODZĄCY
 #   BLIK P2P-PRZYCHODZĄCY
 #   PRZELEW EXPRESS ELIXIR PRZYCH.
-#   ... и любые будущие варианты
-# Корень PRZYCH покрывает все варианты без перечисления конкретных фраз.
+#   ... i wszelkie przyszłe warianty
+# Rdzeń PRZYCH obejmuje wszystkie warianty bez wymieniania konkretnych fraz.
 INCOMING_ROOT = "PRZYCH"
 
-# Ключевые слова юридических лиц и банковских операций — исключить
+# Słowa kluczowe firm i operacji bankowych — do wykluczenia
 COMPANY_KEYWORDS = [
     "SPÓŁKA", "S.A.", "SP. Z O.O.", "SP.Z O.O.",
     "ZAKŁAD", "URZĄD", "FUNDUSZ", "TOWARZYSTWO",
@@ -38,10 +38,10 @@ COMPANY_KEYWORDS = [
 ]
 
 
-# ─── Парсинг данных ────────────────────────────────────────────────────────────
+# ─── Parsowanie danych ─────────────────────────────────────────────────────────
 
 def find_header_row(file_path: str, encoding: str) -> int:
-    """Находит номер строки с заголовком таблицы (0-indexed)."""
+    """Znajduje numer wiersza z nagłówkiem tabeli (indeksowany od 0)."""
     with open(file_path, encoding=encoding, errors="replace") as f:
         for i, line in enumerate(f):
             if HEADER_MARKER in line:
@@ -53,11 +53,11 @@ def find_header_row(file_path: str, encoding: str) -> int:
 
 
 def parse_kwota(value: str) -> float:
-    """Преобразует '1 300,00 PLN' → 1300.0, '-22,15 PLN' → -22.15"""
+    """Zamienia '1 300,00 PLN' → 1300.0, '-22,15 PLN' → -22.15"""
     cleaned = (
         str(value)
         .replace(" PLN", "")
-        .replace("\xa0", "")   # неразрывный пробел
+        .replace("\xa0", "")   # twarda spacja
         .replace(" ", "")
         .replace(",", ".")
     )
@@ -68,55 +68,55 @@ def parse_kwota(value: str) -> float:
 
 
 def _clean_address(name_part: str) -> str:
-    """Убирает адрес из строки «ИМЯ [АДРЕС]», оставляя только имя."""
-    # Убираем суффикс " ." (формат BLIK: «TIUPA YELYZAVETA .»)
+    """Usuwa adres z tekstu „IMIĘ [ADRES]”, pozostawiając samo imię i nazwisko."""
+    # Usuwamy sufiks " ." (format BLIK: „TIUPA YELYZAVETA .”)
     name_part = re.sub(r"\s+\.\s*$", "", name_part).strip()
-    # Убираем адрес с явными префиксами улицы
+    # Usuwamy adres z wyraźnym prefiksem ulicy
     name_part = re.split(r"\s+(?:UL\.|AL\.|OS\.|PL\.)", name_part)[0].strip()
-    # Убираем почтовый индекс и всё после него
+    # Usuwamy kod pocztowy i wszystko po nim
     name_part = re.sub(r"\s+\d{2}-\d{3}.*$", "", name_part).strip()
-    # Убираем «НАЗВАНИЕ_УЛИЦЫ НОМЕР_ДОМА» без префикса (в конце строки)
-    # Пример: «BOHDAN HUDYMA GRANICZNA 53/74» → «BOHDAN HUDYMA»
+    # Usuwamy „NAZWA_ULICY NUMER_DOMU” bez prefiksu (na końcu tekstu)
+    # Przykład: „BOHDAN HUDYMA GRANICZNA 53/74” → „BOHDAN HUDYMA”
     name_part = re.sub(r"\s+\S+\s+\d+[\w/]*\s*$", "", name_part).strip()
     return " ".join(name_part.split()).upper()
 
 
 def extract_address(desc: str) -> tuple[str, str, str]:
     """
-    Извлекает адрес из поля Opis operacji.
-    Возвращает (улица, почтовый_индекс, город).
-    Возвращает ("", "", "") если адреса нет (BLIK, Express Elixir и т.д.).
+    Wyodrębnia adres z pola Opis operacji.
+    Zwraca (ulica, kod_pocztowy, miejscowość).
+    Zwraca ("", "", "") gdy adresu brak (BLIK, Express Elixir itd.).
 
-    Стандартный формат: «ИМЯ [УЛ. УЛИЦА НОМЕР] [КОД ГОРОД], ЗАГОЛОВОК ...»
-    Адрес находится в блоке до первой запятой, после имени.
+    Format standardowy: „IMIĘ [UL. ULICA NUMER] [KOD MIASTO], TYTUŁ ...”
+    Adres znajduje się w bloku przed pierwszym przecinkiem, po imieniu.
     """
-    # Express Elixir (нет запятой) — адрес ненадёжен, пропускаем
+    # Express Elixir (brak przecinka) — adres niewiarygodny, pomijamy
     if "," not in desc:
         return ("", "", "")
 
     name_part = desc.split(",")[0].strip()
-    # Убираем BLIK-суффикс " ."
+    # Usuwamy sufiks BLIK " ."
     name_part = re.sub(r"\s+\.\s*$", "", name_part).strip()
 
-    # ── Ищем почтовый индекс XX-XXX ──────────────────────────────────────────
+    # ── Szukamy kodu pocztowego XX-XXX ───────────────────────────────────────
     postal_match = re.search(r'\b(\d{2}-\d{3})\b', name_part)
     if postal_match:
         postal = postal_match.group(1)
         city   = name_part[postal_match.end():].strip().upper()
         before = name_part[:postal_match.start()].strip()
 
-        # Улица с префиксом UL./AL./OS./PL.
+        # Ulica z prefiksem UL./AL./OS./PL.
         pref = re.search(r'(?:UL\.|AL\.|OS\.|PL\.)\s*(.+)$', before, re.I)
         if pref:
             street = "UL. " + pref.group(1).strip().upper()
         else:
-            # Улица без префикса: последний «СЛОВО НОМЕР» в конце строки
+            # Ulica bez prefiksu: ostatnie „SŁOWO NUMER” na końcu tekstu
             no_pref = re.search(r'(\S+)\s+(\d+[\w/]*)\s*$', before)
             street  = (no_pref.group(1) + " " + no_pref.group(2)).upper() if no_pref else ""
 
         return (street, postal, city)
 
-    # ── Только префикс без почтового индекса ─────────────────────────────────
+    # ── Sam prefiks bez kodu pocztowego ──────────────────────────────────────
     pref = re.search(r'(?:UL\.|AL\.|OS\.|PL\.)\s*(.+)$', name_part, re.I)
     if pref:
         return ("UL. " + pref.group(1).strip().upper(), "", "")
@@ -126,29 +126,29 @@ def extract_address(desc: str) -> tuple[str, str, str]:
 
 def extract_name(desc: str) -> str:
     """
-    Извлекает имя клиента из поля Opis operacji.
+    Wyodrębnia nazwę klienta z pola Opis operacji.
 
-    Два формата:
+    Dwa formaty:
 
-    1. Стандартный (PRZELEW / BLIK P2P):
-       «ИМЯ [АДРЕС], ОПИСАНИЕ   ТИП_ОПЕРАЦИИ   НОМЕР_СЧЁТА»
-       → имя берётся до первой запятой
+    1. Standardowy (PRZELEW / BLIK P2P):
+       „IMIĘ [ADRES], TYTUŁ   TYP_OPERACJI   NUMER_RACHUNKU”
+       → imię i nazwisko brane do pierwszego przecinka
 
-    2. Express Elixir (нет запятой):
-       «PRZELEW EXPRESS ELIXIR PRZYCH.  ИМЯ  АДРЕС  .  ...  PRZYCH.  СЧЁТ»
-       → имя берётся из второго блока (после двойного пробела)
+    2. Express Elixir (brak przecinka):
+       „PRZELEW EXPRESS ELIXIR PRZYCH.  IMIĘ  ADRES  .  ...  PRZYCH.  RACHUNEK”
+       → imię i nazwisko brane z drugiego bloku (po podwójnej spacji)
     """
     if "," not in desc:
-        # Express Elixir и подобные форматы без запятой
+        # Express Elixir i podobne formaty bez przecinka
         blocks = [
             b.strip()
             for b in re.split(r"\s{2,}", desc.strip())
             if b.strip() and b.strip() != "."
         ]
-        # blocks[0] — тип операции, blocks[1] — имя (возможно с адресом)
+        # blocks[0] — typ operacji, blocks[1] — imię i nazwisko (ewent. z adresem)
         name_part = blocks[1] if len(blocks) >= 2 else (blocks[0] if blocks else "")
     else:
-        # Стандартный формат
+        # Format standardowy
         name_part = desc.split(",")[0].strip()
 
     result = _clean_address(name_part)
@@ -157,35 +157,35 @@ def extract_name(desc: str) -> str:
 
 def extract_title(desc: str) -> str:
     """
-    Извлекает краткое описание платежа из поля Opis operacji.
+    Wyodrębnia krótki tytuł płatności z pola Opis operacji.
 
-    Стандартный формат: берёт текст после первой запятой, до двойного пробела.
-      Пример: «..., FV 1/03/2026  KOWALSKA...» → «FV 1/03/2026»
+    Format standardowy: bierze tekst po pierwszym przecinku, do podwójnej spacji.
+      Przykład: „..., FV 1/03/2026  KOWALSKA...” → „FV 1/03/2026”
 
-    Express Elixir (нет запятой): возвращает «Express Elixir».
+    Express Elixir (brak przecinka): zwraca „Express Elixir”.
     """
     if "," not in desc:
-        # Express Elixir — в описании нет отдельного назначения платежа
+        # Express Elixir — w opisie nie ma osobnego tytułu płatności
         return "Express Elixir"
 
     after_comma = desc.split(",", 1)[1].strip()
-    # Убираем суффикс «.» (BLIK)
+    # Usuwamy sufiks „.” (BLIK)
     after_comma = re.sub(r"\s+\.\s*$", "", after_comma)
-    # Берём первый токен до 2+ пробелов
+    # Bierzemy pierwszy człon do 2+ spacji
     parts = re.split(r"\s{2,}", after_comma)
     title = parts[0].strip().rstrip(".").strip()
     return title
 
 
 def is_individual(desc: str) -> bool:
-    """True, если платёж от физического лица (не компании).
+    """True, gdy płatność pochodzi od osoby fizycznej (nie od firmy).
 
-    Два независимых признака — если хотя бы один срабатывает, это юрлицо:
-    1. Чёрный список ключевых слов (SPÓŁKA, S.A., URZĄD, ...)
-    2. NIP — 10-значный налоговый номер польского юрлица.
-       У физлиц NIP в банковских описаниях не встречается.
-       Паттерн: ровно 10 цифр, не являющихся частью более длинного числа
-       (IBAN из 26 цифр под это не попадает — там цифры не прерываются).
+    Dwa niezależne sygnały — jeśli którykolwiek zadziała, to firma:
+    1. Czarna lista słów kluczowych (SPÓŁKA, S.A., URZĄD, ...)
+    2. NIP — 10-cyfrowy numer podatkowy polskiej firmy.
+       U osób fizycznych NIP nie występuje w opisach bankowych.
+       Wzorzec: dokładnie 10 cyfr niebędących częścią dłuższej liczby
+       (IBAN z 26 cyfr tu nie pasuje — tam ciąg cyfr jest nieprzerwany).
     """
     desc_upper = desc.upper()
     if any(kw in desc_upper for kw in COMPANY_KEYWORDS):
@@ -196,31 +196,31 @@ def is_individual(desc: str) -> bool:
 
 
 def is_incoming(desc: str) -> bool:
-    """True, если операция — входящий платёж.
-    Проверяет корень PRZYCH, который присутствует в любом польском
-    типе входящего перевода независимо от конкретной формулировки.
+    """True, gdy operacja jest płatnością przychodzącą.
+    Sprawdza rdzeń PRZYCH, obecny w każdym polskim typie przelewu
+    przychodzącego niezależnie od konkretnego sformułowania.
     """
     return INCOMING_ROOT in desc.upper()
 
 
-# ─── Форматирование вывода ─────────────────────────────────────────────────────
+# ─── Formatowanie wyniku ───────────────────────────────────────────────────────
 
 def fmt_amount(value: float) -> str:
     """1300.0 → '1 300,00'"""
     formatted = f"{value:,.2f}".replace(",", " ").replace(".", ",")
-    # Python форматирует 1300.0 как «1,300.00», поправляем вручную
-    # Более надёжный способ:
+    # Python formatuje 1300.0 jako „1,300.00” — poprawiamy ręcznie
+    # Bardziej niezawodny sposób:
     integer_part = int(abs(value))
     frac_part = round(abs(value) % 1 * 100)
     sign = "-" if value < 0 else ""
 
-    # Разбивка на группы по 3 цифры
+    # Podział na grupy po 3 cyfry
     s = str(integer_part)
     groups = []
     while s:
         groups.append(s[-3:])
         s = s[:-3]
-    integer_str = "\u202f".join(reversed(groups))  # неразрывный тонкий пробел
+    integer_str = " ".join(reversed(groups))  # wąska twarda spacja
 
     return f"{sign}{integer_str},{frac_part:02d}"
 
@@ -233,10 +233,10 @@ def print_header(char: str = "=", width: int = 64) -> None:
     print(char * width)
 
 
-# ─── Основная логика ───────────────────────────────────────────────────────────
+# ─── Logika główna ─────────────────────────────────────────────────────────────
 
 def load_transactions(file_path: str, encoding: str) -> pd.DataFrame:
-    """Загружает CSV-выписку mBank, возвращает DataFrame с нужными колонками."""
+    """Wczytuje wyciąg CSV z mBanku, zwraca DataFrame z potrzebnymi kolumnami."""
     header_row = find_header_row(file_path, encoding)
 
     df = pd.read_csv(
@@ -245,10 +245,10 @@ def load_transactions(file_path: str, encoding: str) -> pd.DataFrame:
         encoding=encoding,
         skiprows=header_row,
         dtype=str,
-        index_col=False,   # данные имеют лишний столбец — без авто-индекса
+        index_col=False,   # dane mają nadmiarową kolumnę — bez auto-indeksu
     )
 
-    # Убираем лишние пробелы из названий колонок
+    # Usuwamy zbędne spacje z nazw kolumn
     df.columns = [c.strip() for c in df.columns]
 
     required = ["#Data operacji", "#Opis operacji", "#Kwota"]
@@ -259,7 +259,7 @@ def load_transactions(file_path: str, encoding: str) -> pd.DataFrame:
             f"Dostępne kolumny: {list(df.columns)}"
         )
 
-    # Убираем пустые строки
+    # Usuwamy puste wiersze
     df = df.dropna(subset=["#Data operacji", "#Kwota"])
 
     return df
@@ -267,15 +267,15 @@ def load_transactions(file_path: str, encoding: str) -> pd.DataFrame:
 
 def analyze(file_path: str, encoding: str) -> pd.DataFrame:
     """
-    Загружает выписку, фильтрует платежи от физ. лиц,
-    возвращает DataFrame с колонками: date, name, amount, title.
+    Wczytuje wyciąg, filtruje płatności od osób fizycznych,
+    zwraca DataFrame z kolumnami: date, name, amount, title.
     """
     df = load_transactions(file_path, encoding)
 
-    # Парсим сумму
+    # Parsujemy kwotę
     df["amount"] = df["#Kwota"].apply(parse_kwota)
 
-    # Фильтр: входящие (amount > 0) + ключевые слова + не компания
+    # Filtr: przychodzące (amount > 0) + słowa kluczowe + nie firma
     mask = (
         (df["amount"] > 0)
         & df["#Opis operacji"].apply(lambda x: is_incoming(str(x)))
@@ -286,7 +286,7 @@ def analyze(file_path: str, encoding: str) -> pd.DataFrame:
     if df_clients.empty:
         return df_clients
 
-    # Извлекаем имя, описание и адрес
+    # Wyodrębniamy nazwę, tytuł i adres
     df_clients["name"]  = df_clients["#Opis operacji"].apply(
         lambda x: extract_name(str(x))
     )
@@ -310,10 +310,10 @@ def analyze(file_path: str, encoding: str) -> pd.DataFrame:
 
 def categorize_transaction(amount: float, desc: str) -> str:
     """
-    Относит операцию к одной из трёх категорий:
-      "Klienci"          — приход от физлица (то, что попадает в df_clients)
-      "Pozostałe wpływy" — любой другой приход (от фирм, возвраты, проценты и т.п.)
-      "Wydatki"          — любой расход
+    Przypisuje operację do jednej z trzech kategorii:
+      "Klienci"          — wpłata od osoby fizycznej (to, co trafia do df_clients)
+      "Pozostałe wpływy" — każdy inny wpływ (od firm, zwroty, odsetki itp.)
+      "Wydatki"          — każdy wydatek
     """
     if amount > 0:
         if is_incoming(desc) and is_individual(desc):
@@ -323,7 +323,7 @@ def categorize_transaction(amount: float, desc: str) -> str:
 
 
 def _collapse_desc(desc: str) -> str:
-    """Сворачивает все пробельные последовательности в одиночный пробел."""
+    """Zwija wszystkie ciągi białych znaków do pojedynczej spacji."""
     return " ".join(str(desc).split())
 
 
@@ -335,14 +335,14 @@ def _shorten(text: str, max_len: int = 70) -> str:
 
 def print_reconciliation_report(file_path: str, encoding: str, output_lines: list) -> None:
     """
-    Выводит отдельный отчёт «Kontrola kompletności wyciągu» — разбивает
-    ВСЕ операции выписки на три категории (Klienci / Pozostałe wpływy /
-    Wydatki), чтобы пользователь мог проверить, что ничего не потеряно
-    и общая сумма сходится с выпиской.
+    Generuje osobny raport „Kontrola kompletności wyciągu” — dzieli
+    WSZYSTKIE operacje wyciągu na trzy kategorie (Klienci / Pozostałe
+    wpływy / Wydatki), aby użytkownik mógł sprawdzić, że nic nie zginęło
+    i suma łączna zgadza się z wyciągiem.
 
-    Внутри каждой категории операции группируются по точному совпадению
-    текста «Opis operacji» — повторяющиеся описания (например, комиссии
-    банка) сворачиваются в одну строку с количеством и суммой.
+    Wewnątrz każdej kategorii operacje grupowane są po identycznym tekście
+    „Opis operacji” — powtarzające się opisy (np. prowizje bankowe)
+    zwijane są do jednego wiersza z liczbą operacji i sumą.
     """
 
     def out(line: str = "") -> None:
@@ -412,17 +412,17 @@ def print_reconciliation_report(file_path: str, encoding: str, output_lines: lis
 
 
 def print_report(df: pd.DataFrame, output_lines: list) -> None:
-    """Выводит подробный отчёт по клиентам + сводную таблицу."""
+    """Generuje szczegółowy raport per klient + tabelę zbiorczą."""
 
     def out(line: str = "") -> None:
-        # print() пишет в sys.stdout — это нужно только для CLI-режима.
-        # В GUI-режиме (а тем более в собранном «--windowed» .exe, где
-        # sys.stdout вообще равен None) эта печать не нужна — отчёт и так
-        # собирается в output_lines и выводится в текстовое поле/файл.
-        # При этом она может УПАСТЬ: если кодировка консоли не «понимает»
-        # польские диакритики (например, cp1252/„charmap” не содержит
-        # Ą Ć Ę Ł Ń Ś Ź Ż), print() бросает UnicodeEncodeError и весь
-        # отчёт обрывается с ошибкой — поэтому глушим любые сбои печати.
+        # print() pisze do sys.stdout — potrzebne tylko w trybie CLI.
+        # W trybie GUI (a tym bardziej w zbudowanym „--windowed” .exe, gdzie
+        # sys.stdout jest wręcz równy None) ten wydruk nie jest potrzebny —
+        # raport i tak zbierany jest w output_lines i trafia do pola
+        # tekstowego/pliku. Przy tym wydruk może SIĘ WYSYPAĆ: jeśli kodowanie
+        # konsoli nie „rozumie” polskich znaków (np. cp1252/„charmap” nie
+        # zawiera Ą Ć Ę Ł Ń Ś Ź Ż), print() rzuca UnicodeEncodeError i cały
+        # raport urywa się błędem — dlatego wyciszamy wszelkie błędy druku.
         try:
             print(line)
         except Exception:
@@ -433,14 +433,14 @@ def print_report(df: pd.DataFrame, output_lines: list) -> None:
         out("Nie znaleziono płatności od osób fizycznych.")
         return
 
-    # Определяем дату первого платежа каждого клиента
+    # Ustalamy datę pierwszej wpłaty każdego klienta
     first_payment = df.groupby("name")["date"].min().rename("first_date")
     df_sorted = df.join(first_payment, on="name")
 
-    # Сортируем: клиенты — по дате первого платежа, внутри клиента — по дате
+    # Sortujemy: klienci — wg daty pierwszej wpłaty, w ramach klienta — wg daty
     df_sorted = df_sorted.sort_values(["first_date", "name", "date"])
 
-    # ── Блоки по клиентам (sort=False — порядок уже задан выше) ──
+    # ── Bloki per klient (sort=False — kolejność już ustalona wyżej) ──
     for name, group in df_sorted.groupby("name", sort=False):
         group = group.sort_values("date")
         total = group["amount"].sum()
@@ -451,7 +451,7 @@ def print_report(df: pd.DataFrame, output_lines: list) -> None:
         out(f"  KLIENT: {name}")
         out("-" * 64)
 
-        # Таблица транзакций
+        # Tabela transakcji
         rows = []
         for _, row in group.iterrows():
             rows.append([row["date"], fmt_amount(row["amount"]) + " PLN", row["title"]])
@@ -473,7 +473,7 @@ def print_report(df: pd.DataFrame, output_lines: list) -> None:
         out("  " + "─" * 44)
         out(f"  RAZEM:  {fmt_amount(total) + ' PLN':>16}  ({count} transakcji)")
 
-    # ── Сводная таблица ──
+    # ── Tabela zbiorcza ──
     out()
     out()
     out("═" * 64)
@@ -550,23 +550,23 @@ Przykłady:
 
     args = parser.parse_args()
 
-    # Проверяем файл
+    # Sprawdzamy plik
     if not Path(args.file).exists():
         print(f"Błąd: plik nie znaleziony: {args.file}", file=sys.stderr)
         sys.exit(1)
 
-    # Анализ
+    # Analiza
     try:
         df = analyze(args.file, args.encoding)
     except Exception as exc:
         print(f"Błąd podczas odczytu pliku: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    # Вывод
+    # Wynik
     output_lines: list = []
     print_report(df, output_lines)
 
-    # Сохранение в файл
+    # Zapis do pliku
     if args.output:
         try:
             with open(args.output, "w", encoding="utf-8") as f:
@@ -577,7 +577,7 @@ Przykłady:
 
 
 if __name__ == "__main__":
-    # Переключаем stdout/stderr на UTF-8 для Windows-терминала
+    # Przełączamy stdout/stderr na UTF-8 dla terminala Windows
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if hasattr(sys.stderr, "reconfigure"):
