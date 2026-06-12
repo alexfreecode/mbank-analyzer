@@ -1,0 +1,71 @@
+mBank Analyzer — opis funkcjonalności
+═══════════════════════════════════════════════════════════════════════════
+
+Do czego służy program?
+─────────────────────────────────────────────────────────────────────────────
+mBank Analyzer to proste narzędzie dla osób prowadzących działalność (np.
+terapeutów, korepetytorów, freelancerów), które co miesiąc muszą przejrzeć
+wpłaty od klientów na koncie bankowym i wystawić za nie faktury. Program
+automatyzuje tę żmudną, ręczną pracę.
+
+
+Co program potrafi
+─────────────────────────────────────────────────────────────────────────────
+
+1. Wczytuje listę operacji wyeksportowaną z bankowości internetowej mBank
+   (plik CSV pobrany w sekcji „Historia” → „Eksportuj listę”) i automatycznie
+   rozpoznaje, kto i ile wpłacił — odróżniając wpłaty od osób prywatnych od
+   innych operacji (przelewy własne, opłaty bankowe itp.).
+
+2. Przygotowuje czytelny raport zbiorczy na podstawie wczytanej listy
+   operacji — listę wszystkich klientów wraz z datami i kwotami ich wpłat,
+   sumę miesięczną dla każdego z nich oraz łączną tabelę zbiorczą za cały
+   okres. Raport można obejrzeć od razu w programie albo zapisać do pliku
+   tekstowego.
+
+3. Generuje gotowy plik importu faktur do Saldeo Smart — jednym kliknięciem
+   tworzy plik Excel ze wszystkimi danymi potrzebnymi do wystawienia faktur
+   (dane nabywcy, kwoty, daty, sposób płatności itd.), gotowy do wczytania
+   w Saldeo. Pozwala przy tym wybrać, których klientów uwzględnić, a których
+   pominąć.
+
+4. Chroni przed dublowaniem kontrahentów w Saldeo — program może porównać
+   klientów z listy operacji z bazą kontrahentów już istniejącą w Saldeo
+   i ostrzec, jeśli jakieś nazwisko jest zapisane nieco inaczej (np. inna
+   kolejność imienia i nazwiska albo drobna literówka). Dzięki temu unikasz
+   sytuacji, w której Saldeo tworzy drugą, zdublowaną kartę tego samego
+   klienta.
+
+5. Zapamiętuje Twoje dane sprzedawcy — imię/nazwę firmy, numer konta i nazwę
+   usługi wpisujesz raz, a program wykorzystuje je przy każdym kolejnym
+   generowaniu faktur (z możliwością poprawienia w dowolnej chwili).
+
+6. Zawiera wbudowaną pomoc — szczegółową instrukcję krok po kroku dostępną
+   bezpośrednio z poziomu programu (przycisk „Pomoc”), która tłumaczy każdą
+   funkcję w prostych słowach.
+
+
+Najważniejsze zalety
+─────────────────────────────────────────────────────────────────────────────
+• Oszczędza czas — to, co zajmowało godziny ręcznej pracy, teraz trwa
+  kilka minut.
+
+• Działa lokalnie — żadne dane (Twoje ani Twoich klientów) nie są nigdzie
+  wysyłane przez internet; wszystko przetwarzane jest na Twoim komputerze.
+
+• Minimalizuje ryzyko pomyłek przy ręcznym przepisywaniu danych do faktur.
+
+• Program działa w oparciu o bezpłatny eksport listy operacji (CSV) — nie
+  wymaga wykupywania żadnych dodatkowych, płatnych usług bankowych.
+
+
+Słowo na koniec — jak to powstało
+─────────────────────────────────────────────────────────────────────────────
+Ten program to przykład tzw. „vibe codingu”: pomysł, potrzebę i wszystkie
+wymagania sformułował człowiek — osoba, która co miesiąc zmagała się
+z dokładnie tym samym żmudnym zadaniem co Ty. Natomiast całą resztę —
+projekt, kod, testy, poprawki, instalator i tę instrukcję — od początku do
+końca napisała sztuczna inteligencja (Claude, Anthropic), prowadzona
+kolejnymi, jasno postawionymi zadaniami. Bez fałszywej skromności: to ona
+zrobiła tu całą robotę programistyczną — rolą człowieka było wiedzieć,
+czego potrzebuje, i to dobrze opisać.
