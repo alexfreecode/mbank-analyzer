@@ -5,7 +5,7 @@ korepetytorów, freelancerów), które co miesiąc muszą przejrzeć wpłaty od
 klientów na koncie mBank i wystawić za nie faktury w Saldeo Smart.
 Program automatyzuje tę żmudną, ręczną pracę.
 
-<!-- screenshot: docs/screenshot.png -->
+![mBank Analyzer — okno główne](docs/screenshot.png)
 
 ## Co program potrafi
 
