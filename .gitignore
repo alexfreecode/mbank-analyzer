@@ -1,4 +1,4 @@
-# Артефакты сборки
+# Build artifacts
 build/
 dist/
 *.spec
@@ -8,10 +8,9 @@ app.ico
 __pycache__/
 *.pyc
 
-# Локальные тестовые данные — содержат РЕАЛЬНЫЕ данные клиентов
-# (выписки, выгрузки контрагентов, скриншоты с именами) — НИКОГДА не публиковать
+# Local test data — never committed
 test_run/
 
-# Временные файлы
+# Temporary files
 *.log
 *.tmp
