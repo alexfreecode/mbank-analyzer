@@ -12,7 +12,7 @@
 ; obsługą odinstalowania.
 
 #define MyAppName "mBank Analyzer"
-#define MyAppVersion "1.0"
+#define MyAppVersion "1.1"
 ; Neutralna nazwa wydawcy — żadnych danych osobistych w instalatorze
 ; (program ma być swobodnie przekazywalny, bez niczyich danych osobowych)
 #define MyAppPublisher "mBank Analyzer"

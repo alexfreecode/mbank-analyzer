@@ -120,6 +120,7 @@ def generate_saldeo_xlsx(
     seller_name: str | None = None,
     seller_account: str | None = None,
     service_name: str | None = None,
+    mark_paid: bool = False,
 ) -> tuple[str, list[str]]:
     """
     Generuje plik Excel importu faktur dla Saldeo Smart.
@@ -145,6 +146,12 @@ def generate_saldeo_xlsx(
                      None → SELLER_ACCOUNT (stała)
     service_name   : nazwa usługi („Nazwa towaru”);
                      None → SERVICE_NAME (stała)
+    mark_paid      : czy wypełnić kolumnę „Zapłacono” kwotą faktury.
+                     False (domyślnie) → kolumna pozostaje PUSTA, dzięki czemu
+                     po imporcie faktury są w Saldeo nieopłacone i można je
+                     ręcznie powiązać z wpłatami z wyciągu. True → wpisuje kwotę
+                     (faktury od razu oznaczone jako zapłacone — uniemożliwia
+                     późniejsze uzgodnienie z płatnościami).
 
     Returns
     -------
@@ -247,7 +254,10 @@ def generate_saldeo_xlsx(
         row["Stawka VAT"]                           = VAT_RATE
         row["Podstawa zastosowania stawki ZW"]      = vat_basis
         row["Forma płatności"]                      = PAYMENT_METHOD
-        row["Zapłacono"]                            = total
+        # „Zapłacono”: domyślnie PUSTE — faktury importują się jako nieopłacone,
+        # co pozwala później uzgodnić je z wpłatami z wyciągu. Wypełniamy kwotą
+        # tylko, gdy użytkownik świadomie wybrał oznaczenie jako zapłacone.
+        row["Zapłacono"]                            = total if mark_paid else ""
         row["Konto bankowe"]                        = seller_account
         row["Wystawca faktury"]                     = seller_name
 

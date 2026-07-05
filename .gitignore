@@ -14,3 +14,9 @@ test_run/
 # Temporary files
 *.log
 *.tmp
+
+# Private marketing notes — never published
+marketing_grupy_FB.md
+
+# Video assets (script, voiceover, shot list) — marketing, not for repo
+video/

@@ -107,6 +107,10 @@ Otwiera on okno, w którym można:
   • ustawić numer początkowy faktury („Lp.”),
   • wybrać „Podstawę zastosowania stawki ZW” (a113, a43, a82, du, iz — zgodnie
     z tym, jak rozliczasz zwolnienie z VAT z urzędem skarbowym),
+  • zdecydować, czy oznaczyć faktury jako zapłacone (pole „Zapłacono”).
+    Domyślnie WYŁĄCZONE — faktury trafiają do Saldeo jako nieopłacone, dzięki
+    czemu możesz je później uzgodnić z wpłatami z wyciągu. Włącz tę opcję tylko,
+    jeśli chcesz od razu zaznaczyć je jako opłacone,
   • wskazać plik wynikowy .xlsx,
   • opcjonalnie wskazać bazę kontrahentów Saldeo, by uniknąć duplikatów —
     patrz punkt 5 poniżej.
@@ -637,6 +641,22 @@ class SaldeoDialog(tk.Toplevel):
                      state="readonly", width=8,
                      font=FONT_UI).pack(side=tk.LEFT, padx=(8, 0))
 
+        # ── Oznaczenie faktur jako zapłacone (domyślnie WYŁĄCZONE) ──
+        self.mark_paid_var = tk.BooleanVar(value=cfg.get("mark_paid", False))
+        paid_row = tk.Frame(outer, bg="#f0f0f0")
+        paid_row.pack(fill=tk.X, pady=(0, 2))
+        tk.Checkbutton(
+            paid_row,
+            text="Oznacz faktury jako zapłacone (wypełnij kolumnę „Zapłacono”)",
+            variable=self.mark_paid_var,
+            bg="#f0f0f0", font=FONT_UI, anchor="w",
+        ).pack(anchor="w")
+        tk.Label(outer,
+                 text=("Domyślnie wyłączone — faktury importują się jako nieopłacone,\n"
+                       "dzięki czemu można je później uzgodnić z wpłatami z wyciągu."),
+                 font=("Segoe UI", 8), fg="#666666", bg="#f0f0f0",
+                 justify="left").pack(anchor="w", pady=(0, 10))
+
         # ── Porównanie z bazą kontrahentów Saldeo (opcjonalnie) ──
         tk.Label(outer, text="Baza kontrahentów Saldeo — plik CSV (opcjonalnie):",
                  font=FONT_UI, bg="#f0f0f0").pack(anchor="w")
@@ -724,12 +744,14 @@ class SaldeoDialog(tk.Toplevel):
         start_num = self.inv_num_var.get()
         vat_basis = self.vat_basis_var.get().strip()
         contractors_csv = self.contractors_csv_var.get().strip()
+        mark_paid = self.mark_paid_var.get()
 
         # Zapisujemy ustawienia na następne uruchomienie
         cfg = _load_config()
         cfg["vat_basis"]               = vat_basis
         cfg["excluded_clients"]        = sorted(excluded)   # odznaczone pola
         cfg["saldeo_contractors_csv"]  = contractors_csv
+        cfg["mark_paid"]               = mark_paid
         _save_config(cfg)
 
         # ── Porównanie z bazą kontrahentów Saldeo (gdy wskazano plik) ──
@@ -798,6 +820,7 @@ class SaldeoDialog(tk.Toplevel):
                 seller_name=cfg.get("seller_name") or None,
                 seller_account=cfg.get("seller_account") or None,
                 service_name=cfg.get("service_name") or None,
+                mark_paid=mark_paid,
             )
         except Exception as exc:
             messagebox.showerror("Błąd podczas generowania", str(exc), parent=self)
