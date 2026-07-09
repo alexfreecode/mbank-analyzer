@@ -33,7 +33,7 @@ Program automatyzuje tę żmudną, ręczną pracę.
 - **Zapamiętuje dane sprzedawcy** — imię/nazwę, numer konta i nazwę usługi
   wpisujesz raz; można je zmienić w dowolnej chwili.
 - **Wbudowana pomoc** — instrukcja krok po kroku dostępna z poziomu programu
-  (przycisk „Pomoc”).
+  (menu „Pomoc”).
 
 ## Prywatność
 

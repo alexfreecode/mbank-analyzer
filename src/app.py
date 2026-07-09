@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import tkinter as tk
+from datetime import date, datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
@@ -63,6 +64,84 @@ FONT_BTN  = ("Segoe UI", 10)
 WIN_W, WIN_H = 860, 680
 PAD = 10
 
+# ─── Motywy raportów (ciemne / jasne tło) ─────────────────────────────────────
+
+REPORT_THEMES = {
+    "dark": {
+        "bg": "#1e1e1e", "fg": "#d4d4d4", "insert": "white",
+        "naglowek": "#ffffff", "klienci": "#5ecf5e", "wplywy": "#58b6f0",
+        "wydatki": "#f0705e", "suma": "#ffd75e", "linia": "#5a5a5a",
+    },
+    "light": {
+        "bg": "#ffffff", "fg": "#1e1e1e", "insert": "black",
+        "naglowek": "#000000", "klienci": "#187a18", "wplywy": "#0b62a4",
+        "wydatki": "#c0392b", "suma": "#9a6b00", "linia": "#9a9a9a",
+    },
+}
+
+
+def _report_theme() -> dict:
+    """Aktualny motyw raportów wg config.json (domyślnie ciemny)."""
+    name = _load_config().get("report_theme", "dark")
+    return REPORT_THEMES.get(name, REPORT_THEMES["dark"])
+
+
+def _koloruj_raport(text: tk.Text, report_text: str, theme: dict) -> None:
+    """Kolorowe wyróżnienie nagłówków i sum — wspólne dla raportu głównego
+    i okna „Kontrola kompletności". Sekcje mają własne kolory, a sumy
+    od razu rzucają się w oczy."""
+    bold = (FONT_MONO[0], FONT_MONO[1], "bold")
+    text.tag_configure("naglowek", foreground=theme["naglowek"], font=bold)
+    text.tag_configure("klienci",  foreground=theme["klienci"],  font=bold)
+    text.tag_configure("wplywy",   foreground=theme["wplywy"],   font=bold)
+    text.tag_configure("wydatki",  foreground=theme["wydatki"],  font=bold)
+    text.tag_configure("suma",     foreground=theme["suma"],     font=bold)
+    text.tag_configure("linia",    foreground=theme["linia"])
+
+    for i, line in enumerate(report_text.splitlines(), start=1):
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith(("KONTROLA KOMPLETNOŚCI", "TABELA ZBIORCZA",
+                         "Unikalnych klientów")):
+            tag = "naglowek"
+        elif s.startswith(("KLIENT:", "KLIENCI")):
+            tag = "klienci"
+        elif s.startswith("POZOSTAŁE WPŁYWY"):
+            tag = "wplywy"
+        elif s.startswith("WYDATKI"):
+            tag = "wydatki"
+        elif s.startswith(("SUMA KONTROLNA", "RAZEM")):
+            tag = "suma"
+        elif set(s) <= {"═", "─", "=", "-"}:
+            tag = "linia"
+        else:
+            continue
+        text.tag_add(tag, f"{i}.0", f"{i}.end")
+
+
+def secondary_btn(parent, text: str, command, width: int | None = None) -> tk.Button:
+    """Jednolity styl przycisków drugorzędnych: płaski, szary, kursor „rączka”.
+    Przyciski główne (kolorowe) pozostają definiowane osobno."""
+    kw = dict(
+        text=text, font=FONT_BTN, command=command,
+        relief=tk.FLAT, bg="#e4e4e4", activebackground="#d0d0d0",
+        cursor="hand2", padx=10, pady=3, bd=0,
+        highlightthickness=1, highlightbackground="#c0c0c0",
+    )
+    if width is not None:
+        kw["width"] = width
+    return tk.Button(parent, **kw)
+
+
+def _icon_path() -> str | None:
+    """Ścieżka do app.ico: w zbudowanym .exe — rozpakowana przez PyInstaller
+    do folderu tymczasowego (_MEIPASS), przy uruchomieniu ze źródeł —
+    assets/ obok src/. None, gdy pliku nie ma (ikona jest opcjonalna)."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    p = base / "assets" / "app.ico"
+    return str(p) if p.exists() else None
+
 # ─── Tekst pomocy (wyświetlany w oknie „Pomoc”) ───────────────────────────────
 
 HELP_TEXT = """\
@@ -84,7 +163,7 @@ faktury do importu w Saldeo.
 
 2. PODSTAWOWA ANALIZA LISTY OPERACJI
 ─────────────────────────────────────────────────────────────────────────────
-  1. Kliknij „Wybierz...” przy polu „Plik wejściowy CSV” i wskaż wyeksportowaną
+  1. Kliknij „Wybierz” przy polu „Plik wejściowy CSV” i wskaż wyeksportowaną
      z bankowości internetowej listę operacji (plik .csv).
   2. Jeśli chcesz dodatkowo zapisać wynik do pliku tekstowego — wskaż jego
      ścieżkę w polu „Plik wyjściowy TXT (opcjonalnie)” (krok ten można pominąć).
@@ -96,9 +175,32 @@ faktury do importu w Saldeo.
      tabelą zbiorczą.
 
 
-3. GENEROWANIE FAKTUR DLA SALDEO SMART
+3. KONTROLA KOMPLETNOŚCI WYCIĄGU
 ─────────────────────────────────────────────────────────────────────────────
-Po pomyślnie zakończonej analizie aktywuje się przycisk „Faktury Saldeo...”.
+Przycisk „✓ Kontrola kompletności” tworzy osobny raport, który dzieli
+WSZYSTKIE operacje z wyciągu na trzy grupy:
+
+  • KLIENCI — wpłaty od osób prywatnych (te same, które trafiają do głównego
+    raportu i do faktur),
+  • POZOSTAŁE WPŁYWY — inne przychody (od firm, zwroty, odsetki itp.),
+  • WYDATKI — wszystkie obciążenia konta.
+
+Powtarzające się operacje (np. comiesięczne prowizje bankowe) są zwijane do
+jednego wiersza z liczbą wystąpień i łączną kwotą. Raport kończy SUMA
+KONTROLNA wszystkich operacji — dzięki temu przygotowując dokumenty dla
+księgowości łatwo sprawdzisz, że żadna operacja nie została pominięta,
+a kwoty zgadzają się z wyciągiem co do grosza.
+
+Raport można zapisać do pliku tekstowego („Zapisz jako”) albo skopiować
+w całości do schowka („Kopiuj do schowka”) — np. do wklejenia w e-mailu.
+
+Wskazówka: przycisk działa niezależnie od głównej analizy — wystarczy, że
+wskazany jest plik wejściowy CSV.
+
+
+4. GENEROWANIE FAKTUR DLA SALDEO SMART
+─────────────────────────────────────────────────────────────────────────────
+Po pomyślnie zakończonej analizie aktywuje się przycisk „Faktury Saldeo”.
 Otwiera on okno, w którym można:
 
   • zaznaczyć / odznaczyć klientów, dla których mają zostać wystawione faktury
@@ -113,7 +215,7 @@ Otwiera on okno, w którym można:
     jeśli chcesz od razu zaznaczyć je jako opłacone,
   • wskazać plik wynikowy .xlsx,
   • opcjonalnie wskazać bazę kontrahentów Saldeo, by uniknąć duplikatów —
-    patrz punkt 5 poniżej.
+    patrz punkt 6 poniżej.
 
 Po kliknięciu „Generuj” program tworzy plik Excel gotowy do zaimportowania:
 w Saldeo Smart → Faktury → Importuj z pliku.
@@ -125,22 +227,24 @@ to jako jedną pozycję „1 szt. × suma wpłat” i wypisze stosowne ostrzeże
 taką fakturę warto sprawdzić ręcznie po imporcie.
 
 
-4. DANE SPRZEDAWCY
+5. DANE SPRZEDAWCY
 ─────────────────────────────────────────────────────────────────────────────
-Przycisk „⚙ Dane sprzedawcy...” otwiera okno, w którym można wprowadzić lub
-poprawić w dowolnej chwili:
+Pozycja „Dane sprzedawcy” w pasku menu u góry okna otwiera ustawienia,
+w których można wprowadzić lub poprawić w dowolnej chwili:
 
   • imię / nazwę sprzedawcy — pojawia się na fakturze jako „Wystawca faktury”,
   • numer konta bankowego — pole „Konto bankowe” na fakturze,
   • nazwę usługi — pole „Nazwa towaru” na fakturze (np. „Konsultacja
-    psychologiczna”).
+    psychologiczna”),
+  • tło raportów (ciemne lub jasne) — dotyczy pola „Wynik analizy” oraz okna
+    „Kontrola kompletności”; zmiana jest widoczna od razu.
 
 Dane te zapisywane są lokalnie na Twoim komputerze i wykorzystywane przy
 każdym kolejnym generowaniu faktur — nie trzeba wpisywać ich za każdym razem.
 Nikt poza Tobą nie ma do nich dostępu — nie są nigdzie wysyłane.
 
 
-5. JAK UNIKNĄĆ DUPLIKATÓW KONTRAHENTÓW W SALDEO
+6. JAK UNIKNĄĆ DUPLIKATÓW KONTRAHENTÓW W SALDEO
 ─────────────────────────────────────────────────────────────────────────────
 To opcjonalna, ale zalecana funkcja. Chroni przed sytuacją, w której w bazie
 kontrahentów Saldeo z czasem pojawia się wiele kart dla tej samej osoby —
@@ -153,11 +257,15 @@ Jak z tego skorzystać — krok po kroku:
   a) Zaloguj się do Saldeo Smart, przejdź do sekcji „Kontrahenci” i wyeksportuj
      listę kontrahentów do pliku CSV (zwykle przycisk „Eksportuj”).
 
-  b) Wróć do naszego programu — w oknie „Faktury Saldeo...”, w polu „Baza
-     kontrahentów Saldeo — plik CSV (opcjonalnie)”, kliknij „Wczytaj...”
+  b) Wróć do naszego programu — w oknie „Faktury Saldeo”, w polu „Baza
+     kontrahentów Saldeo — plik CSV (opcjonalnie)”, kliknij „Wczytaj”
      i wskaż plik pobrany w poprzednim kroku. Ścieżka do niego zostanie
      zapamiętana — przy kolejnych generowaniach wystarczy ją od czasu do
      czasu odświeżyć nową wersją wyeksportowanej listy.
+
+     Program pilnuje świeżości tej bazy: jeżeli wskazany plik nie pochodzi
+     z dzisiaj, przed sprawdzeniem zapyta, czy kontynuować ze starszym
+     plikiem, czy przerwać i najpierw pobrać świeży eksport z Saldeo.
 
   c) Kliknij „Generuj”. Program porówna nazwy klientów z listy operacji z bazą
      kontrahentów Saldeo i obsłuży trzy sytuacje:
@@ -192,7 +300,7 @@ Jeśli nie wskażesz pliku z bazą kontrahentów — program po prostu pominie t
 krok i będzie działał tak, jak dotychczas.
 
 
-6. NAJCZĘSTSZE PYTANIA
+7. NAJCZĘSTSZE PYTANIA
 ─────────────────────────────────────────────────────────────────────────────
 P: Program pokazuje klienta jako „NIEZNANY” — co to znaczy?
 O: Nie udało się rozpoznać nazwiska nadawcy w opisie operacji. Zdarza się to
@@ -210,7 +318,7 @@ O: Nie. Wszystkie dane — Twoje dane sprzedawcy oraz wczytywane pliki — są
    przesyłane.
 
 
-7. WSPARCIE AUTORA (całkowicie dobrowolne)
+8. WSPARCIE AUTORA (całkowicie dobrowolne)
 ─────────────────────────────────────────────────────────────────────────────
 Program jest darmowy i takim pozostanie — to w żaden sposób się nie zmieni.
 Jeśli jednak zaoszczędził Ci czasu i miał(a)byś ochotę w jakiś sposób
@@ -288,6 +396,21 @@ class SellerSetupDialog(tk.Toplevel):
         self.service_var = _field("Nazwa usługi (na fakturze):",
                                   cfg.get("service_name", "Usługa"))
 
+        # ── Wygląd: tło raportów (ciemne / jasne) ──
+        theme_row = tk.Frame(outer, bg="#f0f0f0")
+        theme_row.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(theme_row, text="Tło raportów:", font=FONT_UI, bg="#f0f0f0",
+                 width=24, anchor="w").pack(side=tk.LEFT)
+        self.theme_var = tk.StringVar(value=cfg.get("report_theme", "dark"))
+        tk.Radiobutton(theme_row, text="ciemne", value="dark",
+                       variable=self.theme_var, bg="#f0f0f0",
+                       font=FONT_UI,
+                       command=self._on_theme_change).pack(side=tk.LEFT)
+        tk.Radiobutton(theme_row, text="jasne", value="light",
+                       variable=self.theme_var, bg="#f0f0f0",
+                       font=FONT_UI,
+                       command=self._on_theme_change).pack(side=tk.LEFT, padx=(8, 0))
+
         btn_row = tk.Frame(outer, bg="#f0f0f0")
         btn_row.pack(pady=(10, 0))
 
@@ -300,8 +423,8 @@ class SellerSetupDialog(tk.Toplevel):
                   command=self._save).pack(side=tk.LEFT)
 
         if not first_run:
-            tk.Button(btn_row, text="Anuluj", font=FONT_BTN, width=10,
-                      command=self.destroy).pack(side=tk.LEFT, padx=(10, 0))
+            secondary_btn(btn_row, "Anuluj", self.destroy,
+                          width=10).pack(side=tk.LEFT, padx=(10, 0))
 
         # Wyśrodkowanie względem okna rodzica
         self.update_idletasks()
@@ -310,6 +433,17 @@ class SellerSetupDialog(tk.Toplevel):
         self.geometry(f"+{pw - self.winfo_width()//2}+{ph - self.winfo_height()//2}")
 
         self.wait_window()
+
+    def _on_theme_change(self):
+        """Zmiana tła raportów działa NATYCHMIAST (podgląd na żywo) i od razu
+        jest zapisywana — bez tego przełącznik sprawiał wrażenie, że nie
+        reaguje (efekt było widać dopiero przy następnym raporcie)."""
+        cfg = _load_config()
+        cfg["report_theme"] = self.theme_var.get()
+        _save_config(cfg)
+        parent = self.master
+        if hasattr(parent, "apply_report_theme"):
+            parent.apply_report_theme()
 
     def _save(self):
         name    = self.name_var.get().strip()
@@ -329,6 +463,7 @@ class SellerSetupDialog(tk.Toplevel):
         cfg["seller_name"]    = name
         cfg["seller_account"] = account
         cfg["service_name"]   = service or "Usługa"
+        cfg["report_theme"]   = self.theme_var.get()
         _save_config(cfg)
 
         self.destroy()
@@ -426,8 +561,8 @@ class ContractorMatchDialog(tk.Toplevel):
                   relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
                   command=self._confirm).pack(side=tk.LEFT)
 
-        tk.Button(btn_row, text="Anuluj", font=FONT_BTN, width=10,
-                  command=self._cancel).pack(side=tk.LEFT, padx=(10, 0))
+        secondary_btn(btn_row, "Anuluj", self._cancel,
+                      width=10).pack(side=tk.LEFT, padx=(10, 0))
 
     def _confirm(self):
         self.result = {
@@ -468,8 +603,8 @@ class HelpDialog(tk.Toplevel):
         text.insert("1.0", HELP_TEXT)
         text.configure(state=tk.DISABLED)
 
-        tk.Button(outer, text="Zamknij", font=FONT_BTN, width=12,
-                  command=self.destroy).pack(pady=(10, 0))
+        secondary_btn(outer, "Zamknij", self.destroy,
+                      width=12).pack(pady=(10, 0))
 
         # Wyśrodkowanie względem okna rodzica
         self.update_idletasks()
@@ -486,7 +621,9 @@ class ReconciliationDialog(tk.Toplevel):
 
     def __init__(self, parent: tk.Tk, report_text: str, default_dir: str, default_name: str):
         super().__init__(parent)
-        self.transient(parent)
+        # UWAGA: celowo BEZ self.transient(parent) — okna „transient" nie mają
+        # w Windows standardowych przycisków minimalizuj/maksymalizuj, a raport
+        # bywa szeroki i użytkownik chce móc zmaksymalizować okno jednym kliknięciem.
 
         self._report_text = report_text
         self._default_dir = default_dir
@@ -494,35 +631,64 @@ class ReconciliationDialog(tk.Toplevel):
 
         self.title("Kontrola kompletności wyciągu")
         self.configure(bg="#f0f0f0")
-        self.geometry("760x620")
-        self.minsize(480, 360)
+        # Szerokość dobrana do najdłuższych wierszy raportu (~105 znaków mono)
+        self.geometry("1000x640")
+        self.minsize(560, 400)
 
         outer = tk.Frame(self, bg="#f0f0f0", padx=12, pady=12)
         outer.pack(fill=tk.BOTH, expand=True)
 
+        theme = _report_theme()
         text = scrolledtext.ScrolledText(
             outer, font=FONT_MONO, wrap=tk.NONE,
-            bg="#1e1e1e", fg="#d4d4d4",
-            insertbackground="white",
+            bg=theme["bg"], fg=theme["fg"],
+            insertbackground=theme["insert"],
             relief=tk.SUNKEN, bd=1,
         )
         text.pack(fill=tk.BOTH, expand=True)
         text.insert("1.0", report_text)
+        _koloruj_raport(text, report_text, theme)
         text.configure(state=tk.DISABLED)
+        self._text = text   # referencja do przemalowania przy zmianie motywu
+
+        # Poziomy pasek przewijania — raport ma długie wiersze (wrap=NONE),
+        # bez niego tekst byłby ucięty bez możliwości przewinięcia myszą
+        h_scroll = tk.Scrollbar(outer, orient=tk.HORIZONTAL, command=text.xview)
+        h_scroll.pack(fill=tk.X)
+        text.configure(xscrollcommand=h_scroll.set)
 
         btn_row = tk.Frame(outer, bg="#f0f0f0")
         btn_row.pack(pady=(10, 0))
 
-        tk.Button(btn_row, text="Zapisz jako...", font=FONT_BTN, width=14,
-                  command=self._save).pack(side=tk.LEFT, padx=(0, 8))
-        tk.Button(btn_row, text="Zamknij", font=FONT_BTN, width=12,
-                  command=self.destroy).pack(side=tk.LEFT)
+        secondary_btn(btn_row, "Zapisz jako", self._save,
+                      width=14).pack(side=tk.LEFT, padx=(0, 8))
+        self._copy_btn = secondary_btn(btn_row, "Kopiuj do schowka",
+                                       self._copy, width=17)
+        self._copy_btn.pack(side=tk.LEFT, padx=(0, 8))
+        secondary_btn(btn_row, "Zamknij", self.destroy,
+                      width=12).pack(side=tk.LEFT)
 
         # Wyśrodkowanie względem okna rodzica
         self.update_idletasks()
         pw = parent.winfo_x() + parent.winfo_width()  // 2
         ph = parent.winfo_y() + parent.winfo_height() // 2
         self.geometry(f"+{pw - self.winfo_width()//2}+{ph - self.winfo_height()//2}")
+
+    def apply_theme(self, theme: dict) -> None:
+        """Przemalowuje raport na nowy motyw — wywoływane z okna głównego,
+        gdy użytkownik przełączy tło w ustawieniach, a to okno jest otwarte."""
+        self._text.configure(bg=theme["bg"], fg=theme["fg"],
+                             insertbackground=theme["insert"])
+        self._text.configure(state=tk.NORMAL)
+        _koloruj_raport(self._text, self._report_text, theme)
+        self._text.configure(state=tk.DISABLED)
+
+    def _copy(self):
+        self.clipboard_clear()
+        self.clipboard_append(self._report_text)
+        # Krótkie potwierdzenie na samym przycisku (bez wyskakującego okna)
+        self._copy_btn.configure(text="Skopiowano ✓")
+        self.after(1500, lambda: self._copy_btn.configure(text="Kopiuj do schowka"))
 
     def _save(self):
         path = filedialog.asksaveasfilename(
@@ -609,11 +775,11 @@ class SaldeoDialog(tk.Toplevel):
         # Przyciski „Zaznacz wszystko / Odznacz wszystko”
         btn_row = tk.Frame(outer, bg="#f0f0f0")
         btn_row.pack(fill=tk.X, pady=(0, 10))
-        tk.Button(btn_row, text="Zaznacz wszystko",   font=FONT_BTN, width=14,
-                  command=lambda: self._toggle_all(True)).pack(side=tk.LEFT)
-        tk.Button(btn_row, text="Odznacz wszystko", font=FONT_BTN, width=16,
-                  command=lambda: self._toggle_all(False)).pack(side=tk.LEFT,
-                                                                padx=(6, 0))
+        secondary_btn(btn_row, "Zaznacz wszystko",
+                      lambda: self._toggle_all(True), width=14).pack(side=tk.LEFT)
+        secondary_btn(btn_row, "Odznacz wszystko",
+                      lambda: self._toggle_all(False), width=16).pack(side=tk.LEFT,
+                                                                      padx=(6, 0))
 
         # ── Początkowy numer faktury ──
         num_row = tk.Frame(outer, bg="#f0f0f0")
@@ -668,8 +834,8 @@ class SaldeoDialog(tk.Toplevel):
             value=cfg.get("saldeo_contractors_csv", ""))
         tk.Entry(ref_row, textvariable=self.contractors_csv_var,
                  font=FONT_UI, width=46).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        tk.Button(ref_row, text="Wczytaj...", font=FONT_BTN, width=12,
-                  command=self._browse_contractors_csv).pack(side=tk.LEFT, padx=(6, 0))
+        secondary_btn(ref_row, "Wczytaj", self._browse_contractors_csv,
+                      width=12).pack(side=tk.LEFT, padx=(6, 0))
 
         tk.Label(outer,
                  text=("Wskaż plik wyeksportowany z Saldeo (Kontrahenci → Eksportuj),\n"
@@ -688,8 +854,8 @@ class SaldeoDialog(tk.Toplevel):
         self.out_var = tk.StringVar()
         tk.Entry(out_row, textvariable=self.out_var,
                  font=FONT_UI, width=52).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        tk.Button(out_row, text="Zapisz...", font=FONT_BTN, width=12,
-                  command=self._browse_output).pack(side=tk.LEFT, padx=(6, 0))
+        secondary_btn(out_row, "Zapisz", self._browse_output,
+                      width=12).pack(side=tk.LEFT, padx=(6, 0))
 
         # ── Przyciski akcji ──
         action_row = tk.Frame(outer, bg="#f0f0f0")
@@ -703,8 +869,8 @@ class SaldeoDialog(tk.Toplevel):
                   relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
                   command=self._generate).pack(side=tk.LEFT)
 
-        tk.Button(action_row, text="Anuluj", font=FONT_BTN, width=10,
-                  command=self.destroy).pack(side=tk.LEFT, padx=(10, 0))
+        secondary_btn(action_row, "Anuluj", self.destroy,
+                      width=10).pack(side=tk.LEFT, padx=(10, 0))
 
     # ── Obsługa zdarzeń ────────────────────────────────────────────────────────
 
@@ -753,6 +919,29 @@ class SaldeoDialog(tk.Toplevel):
         cfg["saldeo_contractors_csv"]  = contractors_csv
         cfg["mark_paid"]               = mark_paid
         _save_config(cfg)
+
+        # ── Świeżość bazy kontrahentów: baza w Saldeo zmienia się na bieżąco,
+        #    więc sprawdzanie duplikatów na starym eksporcie może być mylące.
+        #    Datą „eksportu" jest data modyfikacji pliku (moment pobrania). ──
+        if contractors_csv:
+            try:
+                mtime = datetime.fromtimestamp(os.path.getmtime(contractors_csv))
+            except OSError:
+                mtime = None
+            if mtime is not None and mtime.date() != date.today():
+                if not messagebox.askyesno(
+                    "Nieaktualna baza kontrahentów?",
+                    "Wskazany plik z bazą kontrahentów Saldeo pochodzi z:\n"
+                    f"    {mtime.strftime('%d.%m.%Y %H:%M')}"
+                    f"    (dziś jest {date.today().strftime('%d.%m.%Y')})\n\n"
+                    "Od tego czasu baza w Saldeo mogła się zmienić i sprawdzenie\n"
+                    "duplikatów może być niedokładne.\n\n"
+                    "Kontynuować ze starszym plikiem?\n\n"
+                    "„Nie” przerwie generowanie — wtedy wyeksportuj świeżą listę\n"
+                    "(Saldeo → Kontrahenci → Eksportuj) i wskaż nowy plik.",
+                    icon="warning", parent=self,
+                ):
+                    return
 
         # ── Porównanie z bazą kontrahentów Saldeo (gdy wskazano plik) ──
         contractor_warnings: list[str] = []
@@ -848,13 +1037,23 @@ class App(tk.Tk):
         self.resizable(True, True)
         self.minsize(640, 480)
 
+        # Ikona programu w pasku tytułu i na pasku zadań; „default=" sprawia,
+        # że dziedziczą ją także wszystkie okna potomne (dialogi)
+        ico = _icon_path()
+        if ico:
+            try:
+                self.iconbitmap(default=ico)
+            except Exception:
+                pass
+
         # Wyśrodkowanie okna na ekranie
         self.update_idletasks()
         x = (self.winfo_screenwidth()  - WIN_W) // 2
         y = (self.winfo_screenheight() - WIN_H) // 2
         self.geometry(f"{WIN_W}x{WIN_H}+{x}+{y}")
 
-        self._df = None   # wynik ostatniej analizy
+        self._df = None            # wynik ostatniej analizy
+        self._last_report = ""     # tekst ostatniego raportu (do przemalowania motywu)
 
         self._build_ui()
 
@@ -870,6 +1069,14 @@ class App(tk.Tk):
     def _build_ui(self):
         self.configure(bg="#f0f0f0")
 
+        # ── Pasek menu (u góry okna) — ustawienia i pomoc bez ikon,
+        #    żeby rząd przycisków zawierał wyłącznie akcje analizy ──
+        menubar = tk.Menu(self)
+        menubar.add_command(label="Dane sprzedawcy",
+                            command=self._open_seller_settings)
+        menubar.add_command(label="Pomoc", command=self._open_help)
+        self.config(menu=menubar)
+
         # ── Panel sterowania (góra) ──
         ctrl = tk.Frame(self, bg="#f0f0f0", padx=PAD, pady=PAD)
         ctrl.pack(fill=tk.X)
@@ -882,8 +1089,8 @@ class App(tk.Tk):
         tk.Entry(ctrl, textvariable=self.input_var,
                  font=FONT_UI, width=68).grid(row=1, column=0,
                                               sticky="ew", padx=(0, 6))
-        tk.Button(ctrl, text="Wybierz...", font=FONT_BTN, width=12,
-                  command=self._browse_input).grid(row=1, column=1)
+        secondary_btn(ctrl, "Wybierz", self._browse_input,
+                      width=12).grid(row=1, column=1)
 
         # Plik wyjściowy TXT
         tk.Label(ctrl, text="Plik wyjściowy TXT (opcjonalnie):", font=FONT_UI,
@@ -893,8 +1100,8 @@ class App(tk.Tk):
         tk.Entry(ctrl, textvariable=self.output_var,
                  font=FONT_UI, width=68).grid(row=3, column=0,
                                               sticky="ew", padx=(0, 6))
-        tk.Button(ctrl, text="Zapisz...", font=FONT_BTN, width=12,
-                  command=self._browse_output).grid(row=3, column=1)
+        secondary_btn(ctrl, "Zapisz", self._browse_output,
+                      width=12).grid(row=3, column=1)
 
         # Kodowanie
         enc_row = tk.Frame(ctrl, bg="#f0f0f0")
@@ -922,7 +1129,7 @@ class App(tk.Tk):
 
         self._saldeo_btn = tk.Button(
             btn_row,
-            text="  Faktury Saldeo...  ",
+            text="  Faktury Saldeo  ",
             font=("Segoe UI", 11),
             bg="#5c2d91", fg="white",
             activebackground="#3b1a5e", activeforeground="white",
@@ -932,29 +1139,8 @@ class App(tk.Tk):
         )
         self._saldeo_btn.pack(side=tk.LEFT, padx=(12, 0))
 
-        tk.Button(
-            btn_row,
-            text="  ✓ Kontrola kompletności  ",
-            font=FONT_BTN,
-            relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
-            command=self._open_reconciliation,
-        ).pack(side=tk.LEFT, padx=(12, 0))
-
-        tk.Button(
-            btn_row,
-            text="  ⚙ Dane sprzedawcy...  ",
-            font=FONT_BTN,
-            relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
-            command=self._open_seller_settings,
-        ).pack(side=tk.LEFT, padx=(12, 0))
-
-        tk.Button(
-            btn_row,
-            text="  ?  Pomoc  ",
-            font=FONT_BTN,
-            relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
-            command=self._open_help,
-        ).pack(side=tk.LEFT, padx=(12, 0))
+        secondary_btn(btn_row, "  ✓ Kontrola kompletności  ",
+                      self._open_reconciliation).pack(side=tk.LEFT, padx=(12, 0))
 
         ctrl.columnconfigure(0, weight=1)
 
@@ -968,11 +1154,12 @@ class App(tk.Tk):
         tk.Label(result_frame, text="Wynik analizy:",
                  font=FONT_UI, bg="#f0f0f0").pack(anchor="w")
 
+        theme = _report_theme()
         self.result_text = scrolledtext.ScrolledText(
             result_frame,
             font=FONT_MONO,
-            bg="#1e1e1e", fg="#d4d4d4",
-            insertbackground="white",
+            bg=theme["bg"], fg=theme["fg"],
+            insertbackground=theme["insert"],
             wrap=tk.NONE,
             state=tk.DISABLED,
         )
@@ -987,7 +1174,7 @@ class App(tk.Tk):
         # ── Pasek stanu ──
         self.status_var = tk.StringVar(
             value="Wybierz plik z listą operacji i kliknij «Uruchom analizę»"
-                  "   •   ☕ Spodobał się program? → zakładka „Pomoc”")
+                  "   •   ☕ Spodobał się program? → menu „Pomoc”")
         tk.Label(self, textvariable=self.status_var,
                  font=("Segoe UI", 9), bg="#e0e0e0",
                  anchor="w", padx=PAD, pady=3,
@@ -1055,11 +1242,17 @@ class App(tk.Tk):
             self.status_var.set("Błąd — zobacz komunikat powyżej")
             return
 
-        # Wyświetlamy w polu tekstowym
+        # Wyświetlamy w polu tekstowym (motyw mógł się zmienić w ustawieniach,
+        # więc stosujemy go przy każdym wyświetleniu raportu)
+        theme = _report_theme()
         report_text = "\n".join(output_lines)
-        self.result_text.configure(state=tk.NORMAL)
+        self._last_report = report_text
+        self.result_text.configure(state=tk.NORMAL,
+                                   bg=theme["bg"], fg=theme["fg"],
+                                   insertbackground=theme["insert"])
         self.result_text.delete("1.0", tk.END)
         self.result_text.insert(tk.END, report_text)
+        _koloruj_raport(self.result_text, report_text, theme)
         self.result_text.configure(state=tk.DISABLED)
         self.result_text.see("1.0")
 
@@ -1124,6 +1317,23 @@ class App(tk.Tk):
                                 "Najpierw uruchom analizę listy operacji.")
             return
         SaldeoDialog(self, self._df)
+
+    def apply_report_theme(self):
+        """Przemalowuje pole wyniku na aktualny motyw — wywoływane od razu
+        po przełączeniu tła w ustawieniach (natychmiastowy podgląd),
+        bez czekania na kolejną analizę."""
+        theme = _report_theme()
+        self.result_text.configure(bg=theme["bg"], fg=theme["fg"],
+                                   insertbackground=theme["insert"])
+        if self._last_report:
+            self.result_text.configure(state=tk.NORMAL)
+            _koloruj_raport(self.result_text, self._last_report, theme)
+            self.result_text.configure(state=tk.DISABLED)
+        # Przemaluj także otwarte okna „Kontrola kompletności" — bez tego
+        # zostawałyby w starym motywie i wyglądało to na błąd
+        for child in self.winfo_children():
+            if isinstance(child, ReconciliationDialog) and child.winfo_exists():
+                child.apply_theme(theme)
 
     def _open_seller_settings(self):
         """Otwiera okno edycji danych sprzedawcy —

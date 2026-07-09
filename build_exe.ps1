@@ -22,6 +22,7 @@ pyinstaller `
     --windowed `
     --name "mBank Analyzer" `
     --icon "$root\assets\app.ico" `
+    --add-data "$root\assets\app.ico;assets" `
     --distpath "$root\dist" `
     --workpath "$root\build" `
     --specpath "$root" `
