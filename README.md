@@ -9,7 +9,9 @@ Program automatyzuje tę żmudną, ręczną pracę.
 > Program jedynie odczytuje pliki CSV/Excel eksportowane ręcznie przez
 > użytkownika z tych serwisów.
 
-![mBank Analyzer — okno główne](docs/screenshot.png)
+[![mBank Analyzer — zobacz demo (1:29)](docs/video-card.jpg)](https://youtu.be/Qm_jxkHjdH4)
+
+<sub>▶ Półtorej minuty: od pliku pobranego z mBanku do gotowych faktur w Saldeo.</sub>
 
 ## Co program potrafi
 
