@@ -1,4 +1,6 @@
-# mBank Analyzer
+# Suma Wpłat
+
+<sub>Program znany wcześniej jako **mBank Analyzer**.</sub>
 
 Proste narzędzie dla osób prowadzących jednoosobową działalność (terapeutów,
 korepetytorów, freelancerów), które co miesiąc muszą przejrzeć wpłaty od
@@ -9,7 +11,7 @@ Program automatyzuje tę żmudną, ręczną pracę.
 > Program jedynie odczytuje pliki CSV/Excel eksportowane ręcznie przez
 > użytkownika z tych serwisów.
 
-[![mBank Analyzer — zobacz demo (1:29)](docs/video-card.jpg)](https://youtu.be/Qm_jxkHjdH4)
+[![Suma Wpłat, zobacz demo (1:29)](docs/video-card.jpg)](https://youtu.be/Qm_jxkHjdH4)
 
 <sub>▶ Półtorej minuty: od pliku pobranego z mBanku do gotowych faktur w Saldeo.</sub>
 
@@ -45,7 +47,7 @@ jest otwarty — każdy może to zweryfikować.
 
 ## Instalacja
 
-1. Pobierz `mBank Analyzer Setup.exe` z sekcji
+1. Pobierz `mBank.Analyzer.Setup.exe` z sekcji
    [Releases](../../releases/latest).
 2. Uruchom instalator — instalacja nie wymaga uprawnień administratora.
 3. Przy pierwszym uruchomieniu program poprosi o dane sprzedawcy
@@ -67,6 +69,16 @@ jest otwarty — każdy może to zweryfikować.
    go w Saldeo Smart.
 
 Szczegółowa instrukcja — przycisk **„Pomoc”** w programie.
+
+## Pytania i nowe wersje
+
+- **Grupa na Facebooku**: pytania o program, pomoc przy pierwszym
+  uruchomieniu, informacje o nowych wersjach:
+  https://www.facebook.com/groups/1828772831868826
+- **Strona na Facebooku**: krótkie nowinki:
+  https://www.facebook.com/profile.php?id=61594082095846
+- **Błąd albo pomysł na nową funkcję**: [Issues](../../issues)
+  w tym repozytorium.
 
 ## Budowanie ze źródeł
 
@@ -92,8 +104,9 @@ kolejnymi, jasno postawionymi zadaniami.
 
 ## English summary
 
-**mBank Analyzer** is a small Windows desktop app for Polish sole traders
-(therapists, tutors, freelancers) who receive client payments into an mBank
+**Suma Wpłat** (formerly mBank Analyzer) is a small Windows desktop app
+for Polish sole traders (therapists, tutors, freelancers) who receive client
+payments into an mBank
 account and invoice them monthly via Saldeo Smart.
 
 It parses the bank statement CSV exported from mBank online banking,
