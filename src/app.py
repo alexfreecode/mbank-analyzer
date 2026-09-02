@@ -16,7 +16,8 @@ from tkinter import (filedialog, messagebox, scrolledtext, simpledialog,
 from difflib import SequenceMatcher
 
 from parser import analyze, print_report, print_reconciliation_report
-from saldeo_export import VAT_BASIS, generate_saldeo_xlsx
+from saldeo_export import (VAT_BASIS, generate_saldeo_xlsx,
+                           _parse_date)
 from contractor_check import (load_saldeo_contractors, check_clients,
                               _normalize as _normalize_txt, SIMILARITY_THRESHOLD)
 
@@ -322,6 +323,40 @@ class AutocompleteCombobox(ttk.Combobox):
         return "break"
 
 
+def _default_output_dir(source_path: str = "") -> Path:
+    """Folder proponowany dla pliku z fakturami: ten sam, w którym leży
+    wczytany wyciąg (zwykle „Pobrane”). Gdy ścieżki wyciągu nie znamy —
+    „Dokumenty”, a w ostateczności folder domowy.
+
+    Katalog roboczy programu odpada: przy starcie ze skrótu jest nim folder
+    instalacji w AppData, czyli miejsce, w którym użytkownik pliku nie znajdzie.
+    """
+    if source_path:
+        parent = Path(source_path).expanduser().parent
+        if parent.is_dir():
+            return parent
+    for candidate in (Path.home() / "Documents", Path.home() / "Dokumenty"):
+        if candidate.is_dir():
+            return candidate
+    return Path.home()
+
+
+def _default_output_name(df) -> str:
+    """Nazwa proponowana dla pliku z fakturami — z miesiącem wpłat, żeby
+    kolejne miesiące nie nadpisywały się nawzajem."""
+    try:
+        # Kolumna „date” to tekst („2026-04-05” albo „05.04.2026”), więc
+        # korzystamy z tego samego parsera, co generator faktur
+        months = sorted({_parse_date(d).strftime("%Y-%m") for d in df["date"]})
+    except Exception:
+        months = []
+    if len(months) == 1:
+        return f"faktury_saldeo_{months[0]}.xlsx"
+    if len(months) > 1:
+        return f"faktury_saldeo_{months[0]}_{months[-1]}.xlsx"
+    return "faktury_saldeo.xlsx"
+
+
 def _icon_path() -> str | None:
     """Ścieżka do app.ico: w zbudowanym .exe — rozpakowana przez PyInstaller
     do folderu tymczasowego (_MEIPASS), przy uruchomieniu ze źródeł —
@@ -399,7 +434,8 @@ Otwiera on okno, w którym można:
     sprzedawcy”, ale można wybrać inną ze słownika (strzałka rozwija całą
     listę, a pisanie zawęża podpowiedzi) albo wpisać zupełnie nową.
     Wybór zapamiętywany jest DLA TEGO KLIENTA i podstawi się następnym razem —
-    patrz punkt 6 poniżej,
+    patrz punkt 6 poniżej. Przy odznaczonym kliencie pole jest wyszarzone:
+    skoro faktury dla niego nie wystawiamy, usługa i tak nigdzie nie trafi,
   • ustawić numer początkowy faktury („Lp.”),
   • wybrać „Podstawę zastosowania stawki ZW” (a113, a43, a82, du, iz — zgodnie
     z tym, jak rozliczasz zwolnienie z VAT z urzędem skarbowym),
@@ -407,7 +443,11 @@ Otwiera on okno, w którym można:
     Domyślnie WYŁĄCZONE — faktury trafiają do Saldeo jako nieopłacone, dzięki
     czemu możesz je później uzgodnić z wpłatami z wyciągu. Włącz tę opcję tylko,
     jeśli chcesz od razu zaznaczyć je jako opłacone,
-  • wskazać plik wynikowy .xlsx,
+  • wskazać plik wynikowy .xlsx — ścieżka jest już wypełniona: to folder
+    wczytanego wyciągu (zwykle „Pobrane”) i nazwa z miesiącem wpłat, np.
+    „faktury_saldeo_2026-04.xlsx”. Można ją zmienić ręcznie albo przyciskiem
+    „Zapisz”. Jeśli wpiszesz samą nazwę, bez folderu, plik trafi tam, gdzie
+    leży wyciąg,
   • opcjonalnie wskazać bazę kontrahentów Saldeo, by uniknąć duplikatów —
     patrz punkt 7 poniżej.
 
@@ -1160,7 +1200,7 @@ class ServicesDialog(tk.Toplevel):
 class SaldeoDialog(tk.Toplevel):
     """Modalne okno konfiguracji i generowania pliku Excel importu Saldeo."""
 
-    def __init__(self, parent: tk.Tk, df):
+    def __init__(self, parent: tk.Tk, df, source_path: str = ""):
         super().__init__(parent)
         self.transient(parent)
         self.grab_set()
@@ -1172,7 +1212,14 @@ class SaldeoDialog(tk.Toplevel):
         self._df = df
         self._client_vars: dict[str, tk.BooleanVar] = {}
         self._service_vars: dict[str, tk.StringVar] = {}   # usługa per klient
-        self._service_boxes: list[AutocompleteCombobox] = []
+        self._service_boxes: dict[str, AutocompleteCombobox] = {}
+
+        # Folder i nazwa proponowane dla pliku wynikowego. Bez tego pole było
+        # puste, a wpisana sama nazwa lądowała w katalogu roboczym programu
+        # (przy uruchomieniu ze skrótu — w folderze instalacji), gdzie nikt
+        # by jej nie szukał i gdzie znika przy odinstalowaniu.
+        self._out_dir  = _default_output_dir(source_path)
+        self._out_name = _default_output_name(df)
         self._result_path: str | None = None
 
         self._build_ui()
@@ -1210,7 +1257,7 @@ class SaldeoDialog(tk.Toplevel):
         # Podpowiedzi usług wyświetlają się w osobnym okienku nad listą, więc
         # przy przewijaniu zostałyby „w powietrzu” — chowamy je razem z ruchem
         def _scroll(*args):
-            for box in self._service_boxes:
+            for box in self._service_boxes.values():
                 box.hide_popup()
             canvas.yview(*args)
 
@@ -1243,8 +1290,9 @@ class SaldeoDialog(tk.Toplevel):
             row.pack(fill=tk.X, padx=6, pady=1)
 
             tk.Checkbutton(row, text=client, variable=var,
-                           bg="white", font=FONT_UI, anchor="w",
-                           width=26).pack(side=tk.LEFT)
+                           bg="white", font=FONT_UI, anchor="w", width=26,
+                           command=lambda c=client: self._sync_service(c),
+                           ).pack(side=tk.LEFT)
 
             # Usługa dla tego klienta: zapamiętany wybór albo usługa główna.
             # Pole jest edytowalne — można wpisać nową usługę (po wygenerowaniu
@@ -1257,7 +1305,8 @@ class SaldeoDialog(tk.Toplevel):
             box = AutocompleteCombobox(row, catalog, textvariable=svar,
                                        font=FONT_UI, width=26)
             box.pack(side=tk.LEFT, padx=(6, 0))
-            self._service_boxes.append(box)
+            self._service_boxes[client] = box
+            self._sync_service(client)     # odznaczony klient → pole wyszarzone
 
         # Przyciski „Zaznacz wszystko / Odznacz wszystko”
         btn_row = tk.Frame(outer, bg="#f0f0f0")
@@ -1338,7 +1387,7 @@ class SaldeoDialog(tk.Toplevel):
         out_row = tk.Frame(outer, bg="#f0f0f0")
         out_row.pack(fill=tk.X, pady=(4, 10))
 
-        self.out_var = tk.StringVar()
+        self.out_var = tk.StringVar(value=str(self._out_dir / self._out_name))
         tk.Entry(out_row, textvariable=self.out_var,
                  font=FONT_UI, width=52).pack(side=tk.LEFT, fill=tk.X, expand=True)
         secondary_btn(out_row, "Zapisz", self._browse_output,
@@ -1362,14 +1411,32 @@ class SaldeoDialog(tk.Toplevel):
     # ── Obsługa zdarzeń ────────────────────────────────────────────────────────
 
     def _toggle_all(self, state: bool):
-        for var in self._client_vars.values():
+        for client, var in self._client_vars.items():
             var.set(state)
+            self._sync_service(client)
+
+    def _sync_service(self, client: str):
+        """Usługa ma sens tylko dla klienta, dla którego wystawiamy fakturę —
+        przy odznaczonym polu wyboru wyszarzamy listę usług, żeby nie kusiła
+        do ustawień, które i tak nie trafią do pliku."""
+        box = self._service_boxes.get(client)
+        if box is None:
+            return
+        if self._client_vars[client].get():
+            box.configure(state="normal")
+        else:
+            box.hide_popup()
+            box.configure(state="disabled")
 
     def _browse_output(self):
+        current = Path(self.out_var.get().strip() or self._out_name)
         path = filedialog.asksaveasfilename(
             title="Zapisz plik importu Saldeo",
             defaultextension=".xlsx",
             filetypes=[("Pliki Excel", "*.xlsx"), ("Wszystkie pliki", "*.*")],
+            initialdir=str(current.parent if current.is_absolute()
+                           else self._out_dir),
+            initialfile=current.name,
         )
         if path:
             self.out_var.set(path)
@@ -1391,7 +1458,12 @@ class SaldeoDialog(tk.Toplevel):
         # Dodajemy .xlsx, gdy nie podano rozszerzenia
         if not Path(out_path).suffix:
             out_path += ".xlsx"
-            self.out_var.set(out_path)
+        # Sama nazwa bez folderu trafiłaby do katalogu roboczego programu —
+        # przy starcie ze skrótu jest nim folder instalacji w AppData.
+        # Zapisujemy wtedy tam, gdzie leży wczytany wyciąg.
+        if not Path(out_path).is_absolute():
+            out_path = str(self._out_dir / out_path)
+        self.out_var.set(out_path)
 
         excluded  = {name for name, var in self._client_vars.items() if not var.get()}
         start_num = self.inv_num_var.get()
@@ -1862,7 +1934,7 @@ class App(tk.Tk):
             messagebox.showinfo("Brak danych",
                                 "Najpierw uruchom analizę listy operacji.")
             return
-        SaldeoDialog(self, self._df)
+        SaldeoDialog(self, self._df, self.input_var.get().strip())
 
     def apply_report_theme(self):
         """Przemalowuje pole wyniku na aktualny motyw — wywoływane od razu
