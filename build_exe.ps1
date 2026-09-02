@@ -1,6 +1,6 @@
 # build_exe.ps1 — buduje samodzielny plik .exe ze źródeł w src/
 #
-# Wynik: dist\mBank Analyzer.exe (jeden plik, --onefile)
+# Wynik: dist\Suma Wplat.exe (jeden plik, --onefile)
 #
 # Wymagania: pip install pyinstaller pillow  (Pillow tylko do generowania ikony)
 
@@ -20,7 +20,7 @@ Write-Host "==> Buduje .exe przez PyInstaller..." -ForegroundColor Cyan
 pyinstaller `
     --onefile `
     --windowed `
-    --name "mBank Analyzer" `
+    --name "Suma Wplat" `
     --icon "$root\assets\app.ico" `
     --add-data "$root\assets\app.ico;assets" `
     --distpath "$root\dist" `
@@ -36,4 +36,4 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host ""
 Write-Host "==> Gotowe! Plik znajduje sie tutaj:" -ForegroundColor Green
-Write-Host "    $root\dist\mBank Analyzer.exe"
+Write-Host "    $root\dist\Suma Wplat.exe"

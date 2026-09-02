@@ -1,6 +1,6 @@
 # build_all.ps1 — pelna kompilacja: .exe (PyInstaller) + instalator (Inno Setup)
 #
-# Wynik: dist\mBank Analyzer Setup.exe — jedyny plik, ktory trzeba
+# Wynik: dist\Suma Wplat Setup.exe — jedyny plik, ktory trzeba
 # przekazac uzytkownikowi do instalacji programu.
 #
 # Wymagania:
@@ -43,5 +43,5 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "========================================================" -ForegroundColor Green
 Write-Host " Gotowe! Plik do przekazania uzytkownikom:" -ForegroundColor Green
-Write-Host "   $root\dist\mBank Analyzer Setup.exe" -ForegroundColor Green
+Write-Host "   $root\dist\Suma Wplat Setup.exe" -ForegroundColor Green
 Write-Host "========================================================" -ForegroundColor Green

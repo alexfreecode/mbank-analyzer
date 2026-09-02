@@ -47,7 +47,7 @@ jest otwarty — każdy może to zweryfikować.
 
 ## Instalacja
 
-1. Pobierz `mBank.Analyzer.Setup.exe` z sekcji
+1. Pobierz `Suma.Wplat.Setup.exe` z sekcji
    [Releases](../../releases/latest).
 2. Uruchom instalator — instalacja nie wymaga uprawnień administratora.
 3. Przy pierwszym uruchomieniu program poprosi o dane sprzedawcy

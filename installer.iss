@@ -1,22 +1,27 @@
-; installer.iss — skrypt Inno Setup budujący instalator mBank Analyzer
+; installer.iss — skrypt Inno Setup budujący instalator „Suma Wpłat”
 ;
 ; Budowanie instalatora:
-;   1) Najpierw uruchomić build_exe.ps1 — powstanie dist\mBank Analyzer.exe
+;   1) Najpierw uruchomić build_exe.ps1 — powstanie dist\Suma Wplat.exe
 ;   2) Następnie skompilować ten plik kompilatorem Inno Setup (ISCC.exe installer.iss)
 ;
-; Wynik: dist\mBank Analyzer Setup.exe — jeden plik do przekazywania użytkownikom.
+; Wynik: dist\Suma Wplat Setup.exe — jeden plik do przekazywania użytkownikom.
 ;
 ; Instalacja przebiega w folderze profilu użytkownika (bez uprawnień
 ; administratora), tworzony jest skrót w menu Start i (opcjonalnie) na
 ; pulpicie, program rejestruje się w „Dodaj/usuń programy” z pełną
 ; obsługą odinstalowania.
 
-#define MyAppName "mBank Analyzer"
-#define MyAppVersion "1.2"
+#define MyAppName "Suma Wpłat"
+#define MyAppVersion "1.3"
 ; Neutralna nazwa wydawcy — żadnych danych osobistych w instalatorze
 ; (program ma być swobodnie przekazywalny, bez niczyich danych osobowych)
-#define MyAppPublisher "mBank Analyzer"
-#define MyAppExeName "mBank Analyzer.exe"
+#define MyAppPublisher "Suma Wpłat"
+; Nazwy plików bez polskich znaków. Plik instalatora trafia na stronę wydań
+; GitHuba, a „ł” zamieniłoby się w adresie na %C5%82 — link wyglądałby
+; podejrzanie i gorzej się go przekleja.
+#define MyAppExeName "Suma Wplat.exe"
+; Poprzednia nazwa programu — potrzebna tylko do posprzątania po aktualizacji
+#define MyAppLegacyName "mBank Analyzer"
 
 [Setup]
 AppId={{B6F2B6B0-2F0A-4C7E-9C9A-7E6B6E1A9D3A}
@@ -30,7 +35,7 @@ PrivilegesRequired=lowest
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=dist
-OutputBaseFilename=mBank Analyzer Setup
+OutputBaseFilename=Suma Wplat Setup
 SetupIconFile=assets\app.ico
 Compression=lzma2
 SolidCompression=yes
@@ -44,6 +49,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+
+; Aktualizacja z wersji o poprzedniej nazwie: AppId się nie zmienia, więc
+; Inno instaluje w tym samym folderze co wcześniej. Zostałby w nim stary plik
+; .exe, a w menu Start — druga, nieaktualna grupa skrótów.
+[InstallDelete]
+Type: files;          Name: "{app}\{#MyAppLegacyName}.exe"
+Type: filesandordirs; Name: "{autoprograms}\{#MyAppLegacyName}"
 
 [Files]
 Source: "dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -80,11 +92,11 @@ begin
 end;
 
 // Dobiera nazwę dla skrótu na pulpicie (bez rozszerzenia .lnk):
-//   - "mBank Analyzer", jeśli pliku o tej nazwie jeszcze nie ma;
+//   - "Suma Wpłat", jeśli pliku o tej nazwie jeszcze nie ma;
 //   - ta sama nazwa, jeśli istniejący skrót wskazuje do wnętrza folderu
 //     instalacji tego programu — to znaczy reinstalacja/aktualizacja
 //     i można go bezpiecznie nadpisać;
-//   - "mBank Analyzer (1)", "(2)", ... jeśli pod tą nazwą leży już
+//   - "Suma Wpłat (1)", "(2)", ... jeśli pod tą nazwą leży już
 //     OBCY skrót (wskazujący gdzie indziej) — aby go nie nadpisać.
 function GetDesktopIconName(Param: String): String;
 var
@@ -113,17 +125,51 @@ begin
   Result := CandidateName;
 end;
 
+// Po aktualizacji z poprzedniej nazwy usuwamy stary skrót z pulpitu —
+// wskazuje na plik .exe, którego już nie ma. Kasujemy wyłącznie skróty
+// prowadzące do wnętrza naszego folderu instalacji; obcy plik o tej samej
+// nazwie zostawiamy nietknięty (ta sama ostrożność, co w GetDesktopIconName).
+procedure RemoveLegacyDesktopIcons();
+var
+  I: Integer;
+  LinkPath, Target, AppDir, Desktop, BaseName: String;
+begin
+  Desktop  := ExpandConstant('{autodesktop}');
+  AppDir   := ExpandConstant('{app}');
+  BaseName := '{#MyAppLegacyName}';
+  for I := 0 to 9 do
+  begin
+    if I = 0 then
+      LinkPath := Desktop + '\' + BaseName + '.lnk'
+    else
+      LinkPath := Desktop + '\' + BaseName + ' (' + IntToStr(I) + ').lnk';
+    if FileExists(LinkPath) then
+    begin
+      Target := GetShortcutTarget(LinkPath);
+      if (Target <> '') and (Pos(Lowercase(AppDir), Lowercase(Target)) > 0) then
+        DeleteFile(LinkPath);
+    end;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    RemoveLegacyDesktopIcons();
+end;
+
 // Po usunięciu plików programu proponujemy także wyczyszczenie folderu ustawień.
-// Folder %APPDATA%\mBank Analyzer zawiera config.json z danymi sprzedawcy
+// Folder %APPDATA%\Suma Wpłat zawiera config.json z danymi sprzedawcy
 // i innymi ustawieniami użytkownika — deinstalator domyślnie go nie rusza,
 // aby ustawienia przetrwały reinstalację/aktualizację.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  AppDataDir: String;
+  AppDataDir, LegacyDataDir: String;
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    AppDataDir := ExpandConstant('{userappdata}\mBank Analyzer');
+    AppDataDir    := ExpandConstant('{userappdata}\{#MyAppName}');
+    LegacyDataDir := ExpandConstant('{userappdata}\{#MyAppLegacyName}');
     if DirExists(AppDataDir) then
     begin
       if MsgBox(
@@ -134,6 +180,10 @@ begin
         mbConfirmation, MB_YESNO) = IDYES then
       begin
         DelTree(AppDataDir, True, True, True);
+        // Ustawienia zostały skopiowane ze starego folderu, więc kasujemy
+        // także jego — inaczej zostałby po nas nieużywany katalog
+        if DirExists(LegacyDataDir) then
+          DelTree(LegacyDataDir, True, True, True);
       end;
     end;
   end;

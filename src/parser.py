@@ -1,5 +1,5 @@
 """
-parser.py — Analizator wyciągu bankowego mBank
+parser.py — Suma Wpłat: analiza wyciągu bankowego mBank
 Grupuje wpłaty przychodzące od osób fizycznych według klienta.
 """
 
@@ -522,7 +522,7 @@ def print_report(df: pd.DataFrame, output_lines: list) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Analizator wyciągu bankowego mBank — płatności od osób fizycznych",
+        description="Suma Wpłat — wpłaty od klientów indywidualnych z wyciągu mBank",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Przykłady:

@@ -1,10 +1,11 @@
 """
-app.py — nakładka GUI dla analizatora wyciągu mBank
+app.py — nakładka GUI programu „Suma Wpłat”
 Uruchomienie: python app.py  (lub pythonw app.py — bez konsoli)
 """
 
 import json
 import os
+import shutil
 import sys
 import tkinter as tk
 from datetime import date, datetime
@@ -24,6 +25,36 @@ from contractor_check import (load_saldeo_contractors, check_clients,
 # ─── Konfiguracja (zachowywana między uruchomieniami) ─────────────────────────
 
 
+# Nazwa programu — używana w tytułach okien i jako nazwa folderu ustawień
+APP_NAME        = "Suma Wpłat"
+# Poprzednia nazwa; potrzebna wyłącznie do przeniesienia starych ustawień
+LEGACY_APP_NAME = "mBank Analyzer"
+
+
+def _migrate_legacy_config(base: Path, new_dir: Path) -> None:
+    """Przenosi ustawienia z folderu poprzedniej nazwy programu.
+
+    Program nazywał się wcześniej „mBank Analyzer” i trzymał config.json
+    w %APPDATA%\\mBank Analyzer. Po zmianie nazwy folder jest inny — bez tego
+    kroku dotychczasowi użytkownicy straciliby dane sprzedawcy, słownik usług
+    i ścieżkę do bazy kontrahentów, a program przywitałby ich oknem
+    „pierwsze uruchomienie”.
+
+    Kopiujemy, a nie przenosimy: gdyby ktoś wrócił do starej wersji,
+    jego ustawienia nadal tam będą.
+    """
+    new_cfg = new_dir / "config.json"
+    if new_cfg.exists():
+        return                                   # nowe ustawienia już są
+    old_cfg = base / LEGACY_APP_NAME / "config.json"
+    if not old_cfg.is_file():
+        return                                   # nie ma czego przenosić
+    try:
+        shutil.copy2(old_cfg, new_cfg)
+    except Exception:
+        pass                                     # brak ustawień nie blokuje startu
+
+
 def _config_dir() -> Path:
     """Folder dla config.json.
 
@@ -35,11 +66,12 @@ def _config_dir() -> Path:
     """
     if getattr(sys, "frozen", False):
         base = Path(os.environ.get("APPDATA", Path.home()))
-        d = base / "mBank Analyzer"
+        d = base / APP_NAME
         try:
             d.mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
+        _migrate_legacy_config(base, d)
         return d
     return Path(__file__).parent
 
@@ -62,7 +94,9 @@ def _save_config(data: dict) -> None:
 
 # ─── Stałe ────────────────────────────────────────────────────────────────────
 
-TITLE     = "Analizator wyciągu mBank"
+# Sama nazwa nie mówi, czego program dotyczy, więc w pasku tytułu
+# zostawiamy też krótki opis
+TITLE     = f"{APP_NAME} — analizator wyciągu mBank"
 FONT_MONO = ("Courier New", 10)
 FONT_UI   = ("Segoe UI", 10)
 FONT_BTN  = ("Segoe UI", 10)
@@ -368,7 +402,7 @@ def _icon_path() -> str | None:
 # ─── Tekst pomocy (wyświetlany w oknie „Pomoc”) ───────────────────────────────
 
 HELP_TEXT = """\
-POMOC — Analizator wyciągu mBank
+POMOC — Suma Wpłat
 ══════════════════════════════════════════════════════════════════════════════
 
 1. DO CZEGO SŁUŻY TEN PROGRAM?
@@ -845,7 +879,7 @@ class HelpDialog(tk.Toplevel):
         super().__init__(parent)
         self.transient(parent)
 
-        self.title("Pomoc — Analizator wyciągu mBank")
+        self.title(f"Pomoc — {APP_NAME}")
         self.configure(bg="#f0f0f0")
         self.geometry("760x620")
         self.minsize(480, 360)
