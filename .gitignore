@@ -10,6 +10,8 @@ __pycache__/
 
 # Local test data — never committed
 test_run/
+# Ustawienia przy uruchomieniu ze źródeł — zawierają dane sprzedawcy
+src/config.json
 
 # Temporary files
 *.log
