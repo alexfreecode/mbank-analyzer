@@ -95,8 +95,8 @@ def _save_config(data: dict) -> None:
 # ─── Stałe ────────────────────────────────────────────────────────────────────
 
 # Sama nazwa nie mówi, czego program dotyczy, więc w pasku tytułu
-# zostawiamy też krótki opis
-TITLE     = f"{APP_NAME} — analizator wyciągu mBank"
+# zostawiamy też krótki opis. Bez nazwy banku — obsługiwane są dwa.
+TITLE     = f"{APP_NAME} — wpłaty od klientów z wyciągu bankowego"
 FONT_MONO = ("Courier New", 10)
 FONT_UI   = ("Segoe UI", 10)
 FONT_BTN  = ("Segoe UI", 10)
@@ -407,21 +407,34 @@ POMOC — Suma Wpłat
 
 1. DO CZEGO SŁUŻY TEN PROGRAM?
 ─────────────────────────────────────────────────────────────────────────────
-Program wczytuje listę operacji wyeksportowaną z bankowości internetowej
-mBank (plik CSV), rozpoznaje wpłaty od poszczególnych klientów, przygotowuje
-czytelny raport zbiorczy oraz — w razie potrzeby — plik gotowy do
-zaimportowania jako faktury do Saldeo Smart.
+Program wczytuje listę operacji wyeksportowaną z bankowości internetowej,
+rozpoznaje wpłaty od poszczególnych klientów, przygotowuje czytelny raport
+zbiorczy oraz — w razie potrzeby — plik gotowy do zaimportowania jako faktury
+do Saldeo Smart.
 
-Typowy cykl pracy: co miesiąc pobierasz z bankowości internetowej (sekcja
-„Historia” → „Eksportuj listę”) listę operacji w formacie CSV → wskazujesz ją
-w programie → uruchamiasz analizę → (opcjonalnie) generujesz na jej podstawie
-faktury do importu w Saldeo.
+Obsługiwane banki i formaty:
+
+  • mBank — „Historia” → „Eksportuj listę”, format CSV;
+  • PKO BP — „Historia” → „Zrealizowane”, na dole listy „Pobierz zestawienie”,
+    format XLS (nie CSV — patrz uwaga niżej).
+
+Bank rozpoznawany jest po zawartości pliku, więc nie trzeba nic przestawiać
+w ustawieniach; kto ma konta w obu bankach, po prostu wskazuje raz jeden plik,
+raz drugi.
+
+Uwaga o PKO: wybierz XLS, a nie CSV. W pliku XLS nazwa i adres nadawcy stoją
+w osobnych kolumnach, a w CSV są wymieszane w jednym polu opisu i dane bywają
+przez to niepewne. Jeśli wskażesz plik CSV z PKO, program o tym przypomni.
+
+Typowy cykl pracy: co miesiąc pobierasz wyciąg z bankowości internetowej →
+wskazujesz go w programie → uruchamiasz analizę → (opcjonalnie) generujesz
+na jej podstawie faktury do importu w Saldeo.
 
 
 2. PODSTAWOWA ANALIZA LISTY OPERACJI
 ─────────────────────────────────────────────────────────────────────────────
-  1. Kliknij „Wybierz” przy polu „Plik wejściowy CSV” i wskaż wyeksportowaną
-     z bankowości internetowej listę operacji (plik .csv).
+  1. Kliknij „Wybierz” przy polu „Wyciąg bankowy” i wskaż wyeksportowaną
+     z bankowości internetowej listę operacji (mBank — .csv, PKO — .xls).
   2. Jeśli chcesz dodatkowo zapisać wynik do pliku tekstowego — wskaż jego
      ścieżkę w polu „Plik wyjściowy TXT (opcjonalnie)” (krok ten można pominąć).
   3. Sprawdź „Kodowanie pliku” — zwykle właściwe jest „utf-8-sig”; jeżeli polskie
@@ -452,7 +465,12 @@ Raport można zapisać do pliku tekstowego („Zapisz jako”) albo skopiować
 w całości do schowka („Kopiuj do schowka”) — np. do wklejenia w e-mailu.
 
 Wskazówka: przycisk działa niezależnie od głównej analizy — wystarczy, że
-wskazany jest plik wejściowy CSV.
+wskazany jest plik z wyciągiem.
+
+W wyciągu PKO trafiają się „blokady kartowe” — kwoty zablokowane przez
+autoryzację karty, jeszcze nie zaksięgowane. Program pokazuje je osobną
+kategorią i NIE wlicza do sum: ta sama płatność wróci później na wyciąg jako
+zwykła operacja kartą i policzyłaby się drugi raz.
 
 
 4. GENEROWANIE FAKTUR DLA SALDEO SMART
@@ -1734,7 +1752,7 @@ class App(tk.Tk):
         ctrl.pack(fill=tk.X)
 
         # Plik wejściowy
-        tk.Label(ctrl, text="Plik wejściowy CSV:", font=FONT_UI,
+        tk.Label(ctrl, text="Wyciąg bankowy:", font=FONT_UI,
                  bg="#f0f0f0").grid(row=0, column=0, sticky="w", pady=(0, 2))
 
         self.input_var = tk.StringVar()
@@ -1836,8 +1854,13 @@ class App(tk.Tk):
 
     def _browse_input(self):
         path = filedialog.askopenfilename(
-            title="Wybierz plik z listą operacji mBank",
-            filetypes=[("Pliki CSV", "*.csv"), ("Wszystkie pliki", "*.*")],
+            title="Wybierz wyciąg bankowy (mBank — CSV, PKO — XLS)",
+            filetypes=[
+                ("Wyciągi bankowe", "*.csv *.xls *.xlsx"),
+                ("mBank — lista operacji (CSV)", "*.csv"),
+                ("PKO — zestawienie operacji (XLS)", "*.xls *.xlsx"),
+                ("Wszystkie pliki", "*.*"),
+            ],
         )
         if not path:
             return
@@ -1867,7 +1890,7 @@ class App(tk.Tk):
     def _run(self):
         input_path = self.input_var.get().strip()
         if not input_path:
-            messagebox.showerror("Błąd", "Wybierz plik wejściowy CSV.")
+            messagebox.showerror("Błąd", "Wybierz plik z wyciągiem bankowym.")
             return
         if not Path(input_path).exists():
             messagebox.showerror("Błąd", f"Plik nie znaleziony:\n{input_path}")
@@ -1940,7 +1963,7 @@ class App(tk.Tk):
     def _open_reconciliation(self):
         input_path = self.input_var.get().strip()
         if not input_path:
-            messagebox.showerror("Błąd", "Wybierz plik wejściowy CSV.")
+            messagebox.showerror("Błąd", "Wybierz plik z wyciągiem bankowym.")
             return
         if not Path(input_path).exists():
             messagebox.showerror("Błąd", f"Plik nie znaleziony:\n{input_path}")

@@ -23,6 +23,7 @@ pyinstaller `
     --name "Suma Wplat" `
     --icon "$root\assets\app.ico" `
     --add-data "$root\assets\app.ico;assets" `
+    --hidden-import xlrd `
     --distpath "$root\dist" `
     --workpath "$root\build" `
     --specpath "$root" `

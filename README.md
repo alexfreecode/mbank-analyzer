@@ -4,8 +4,10 @@
 
 Proste narzędzie dla osób prowadzących jednoosobową działalność (terapeutów,
 korepetytorów, freelancerów), które co miesiąc muszą przejrzeć wpłaty od
-klientów na koncie mBank i wystawić za nie faktury w Saldeo Smart.
+klientów na koncie bankowym i wystawić za nie faktury w Saldeo Smart.
 Program automatyzuje tę żmudną, ręczną pracę.
+
+Obsługiwane banki: **mBank** (plik CSV) i **PKO BP** (plik XLS).
 
 > Projekt nieoficjalny — nie jest powiązany z mBank S.A. ani Saldeo Smart.
 > Program jedynie odczytuje pliki CSV/Excel eksportowane ręcznie przez
@@ -17,14 +19,15 @@ Program automatyzuje tę żmudną, ręczną pracę.
 
 ## Co program potrafi
 
-- **Wczytuje listę operacji z mBanku** (CSV z sekcji „Historia” → „Eksportuj
-  listę”) i automatycznie rozpoznaje wpłaty od osób prywatnych — odróżniając
-  je od przelewów własnych, opłat bankowych i płatności od firm.
+- **Wczytuje listę operacji z banku** — z mBanku (CSV) albo z PKO BP (XLS) —
+  i automatycznie rozpoznaje wpłaty od osób prywatnych, odróżniając je od
+  przelewów własnych, opłat bankowych i płatności od firm. Bank rozpoznawany
+  jest po zawartości pliku, więc nie trzeba niczego przestawiać.
 - **Tworzy czytelny raport zbiorczy** — listę klientów z datami i kwotami
   wpłat, sumą miesięczną każdego klienta i tabelą zbiorczą. Raport można
   obejrzeć w programie albo zapisać do pliku tekstowego.
 - **Kontrola kompletności** — osobny raport rozbijający WSZYSTKIE operacje
-  wyciągu na trzy kategorie (Klienci / Pozostałe wpływy / Wydatki) z sumami
+  wyciągu na kategorie (Klienci / Pozostałe wpływy / Wydatki) z sumami
   kontrolnymi, dzięki któremu łatwo sprawdzisz, że nic nie zostało pominięte
   przy przygotowywaniu dokumentów dla księgowości.
 - **Generuje plik importu faktur do Saldeo Smart** — gotowy Excel ze
@@ -60,7 +63,11 @@ jest otwarty — każdy może to zweryfikować.
 
 ## Jak używać
 
-1. W serwisie mBank: **Historia** → **Eksportuj listę** → format **CSV**.
+1. Pobierz wyciąg z banku:
+   - **mBank**: „Historia” → „Eksportuj listę” → format **CSV**;
+   - **PKO BP**: „Historia” → „Zrealizowane”, na dole listy „Pobierz
+     zestawienie” → format **XLS** (nie CSV — w XLS nazwa i adres nadawcy są
+     w osobnych kolumnach, dzięki czemu dane są pewniejsze).
 2. W programie: wskaż pobrany plik i kliknij **„Uruchom analizę”**.
 3. Obejrzyj raport, w razie potrzeby zapisz go do pliku.
 4. (Opcjonalnie) **„Kontrola kompletności”** — sprawdź, czy wszystkie

@@ -35,6 +35,10 @@ COMPANY_KEYWORDS = [
     "SPÓŁKA", "S.A.", "SP. Z O.O.", "SP.Z O.O.",
     "ZAKŁAD", "URZĄD", "FUNDUSZ", "TOWARZYSTWO",
     "UZNANIE NATYCH",
+    # Świadczenia i przelewy urzędowe. Trafiają na konto jak każda inna
+    # wpłata, a fakturą na ZUS skończyłby się problem, nie wygoda.
+    # „ZUS ” ze spacją, żeby nie łapać nazwisk kończących się na „…ZUS”.
+    "ZUS ", "CENTRUM OBSŁUGI", "ŚWIADCZEŃ",
 ]
 
 
@@ -81,9 +85,58 @@ def _clean_address(name_part: str) -> str:
     return " ".join(name_part.split()).upper()
 
 
+def parse_address_text(text: str, contains_name: bool = True) -> tuple[str, str, str]:
+    """
+    Rozkłada tekst adresu na (ulica, kod_pocztowy, miejscowość).
+
+    `contains_name` mówi, czy w tekście przed adresem stoi jeszcze imię
+    i nazwisko:
+
+      • mBank (True) — adres siedzi w jednym worku razem z nazwiskiem
+        („JAN KOWALSKI UL. KWIATOWA 5 00-001 WARSZAWA”), więc początku ulicy
+        trzeba się domyślać;
+      • PKO (False) — adres przychodzi osobną kolumną „Adres nadawcy”,
+        więc wszystko przed kodem pocztowym JEST ulicą i nie ma czego zgadywać.
+    """
+    text = text.strip()
+
+    # ── Szukamy kodu pocztowego XX-XXX ───────────────────────────────────────
+    postal_match = re.search(r'\b(\d{2}-\d{3})\b', text)
+    if postal_match:
+        postal = postal_match.group(1)
+        city   = text[postal_match.end():].strip().upper()
+        # Część banków dokleja do miejscowości kod kraju („WARSZAWA PL”)
+        city   = re.sub(r'\s+PL$', '', city).strip()
+        before = text[:postal_match.start()].strip()
+
+        # Ulica z prefiksem UL./AL./OS./PL.
+        pref = re.search(r'(?:UL\.|AL\.|OS\.|PL\.)\s*(.+)$', before, re.I)
+        if pref:
+            street = "UL. " + pref.group(1).strip().upper()
+        elif not contains_name:
+            # Nie ma się czego domyślać — całość przed kodem to ulica
+            street = before.upper()
+        else:
+            # Ulica bez prefiksu, wymieszana z nazwiskiem: bierzemy ostatnie
+            # „SŁOWO NUMER”. Rozwiązanie z konieczności — przy adresach
+            # z numerem mieszkania („... 25 5”) potrafi uciąć za dużo.
+            no_pref = re.search(r'(\S+)\s+(\d+[\w/]*)\s*$', before)
+            street  = (no_pref.group(1) + " " + no_pref.group(2)).upper() if no_pref else ""
+
+        return (street, postal, city)
+
+    # ── Sam prefiks bez kodu pocztowego ──────────────────────────────────────
+    pref = re.search(r'(?:UL\.|AL\.|OS\.|PL\.)\s*(.+)$', text, re.I)
+    if pref:
+        return ("UL. " + pref.group(1).strip().upper(), "", "")
+
+    # Bez prefiksu i bez kodu pocztowego nie ma pewności, że to w ogóle adres
+    return ("", "", "")
+
+
 def extract_address(desc: str) -> tuple[str, str, str]:
     """
-    Wyodrębnia adres z pola Opis operacji.
+    Wyodrębnia adres z pola „Opis operacji” wyciągu mBank.
     Zwraca (ulica, kod_pocztowy, miejscowość).
     Zwraca ("", "", "") gdy adresu brak (BLIK, Express Elixir itd.).
 
@@ -98,30 +151,7 @@ def extract_address(desc: str) -> tuple[str, str, str]:
     # Usuwamy sufiks BLIK " ."
     name_part = re.sub(r"\s+\.\s*$", "", name_part).strip()
 
-    # ── Szukamy kodu pocztowego XX-XXX ───────────────────────────────────────
-    postal_match = re.search(r'\b(\d{2}-\d{3})\b', name_part)
-    if postal_match:
-        postal = postal_match.group(1)
-        city   = name_part[postal_match.end():].strip().upper()
-        before = name_part[:postal_match.start()].strip()
-
-        # Ulica z prefiksem UL./AL./OS./PL.
-        pref = re.search(r'(?:UL\.|AL\.|OS\.|PL\.)\s*(.+)$', before, re.I)
-        if pref:
-            street = "UL. " + pref.group(1).strip().upper()
-        else:
-            # Ulica bez prefiksu: ostatnie „SŁOWO NUMER” na końcu tekstu
-            no_pref = re.search(r'(\S+)\s+(\d+[\w/]*)\s*$', before)
-            street  = (no_pref.group(1) + " " + no_pref.group(2)).upper() if no_pref else ""
-
-        return (street, postal, city)
-
-    # ── Sam prefiks bez kodu pocztowego ──────────────────────────────────────
-    pref = re.search(r'(?:UL\.|AL\.|OS\.|PL\.)\s*(.+)$', name_part, re.I)
-    if pref:
-        return ("UL. " + pref.group(1).strip().upper(), "", "")
-
-    return ("", "", "")
+    return parse_address_text(name_part, contains_name=True)
 
 
 def extract_name(desc: str) -> str:
@@ -235,11 +265,90 @@ def print_header(char: str = "=", width: int = 64) -> None:
 
 # ─── Logika główna ─────────────────────────────────────────────────────────────
 
-def load_transactions(file_path: str, encoding: str) -> pd.DataFrame:
-    """Wczytuje wyciąg CSV z mBanku, zwraca DataFrame z potrzebnymi kolumnami."""
+BANK_MBANK = "mbank"
+BANK_PKO   = "pko"
+
+# Kolumny, po których poznajemy wyciąg PKO w formacie XLS
+PKO_KOLUMNY = ("Data operacji", "Typ transakcji", "Kwota", "Nazwa nadawcy")
+
+# Typy operacji PKO, które są wpływami, ale nie płatnościami klientów:
+# wymiana walut i zwrot płatności kartą. Bez tego trafiłyby na faktury.
+PKO_TYPY_NIE_KLIENT = ("WYMIANA W KANTORZE", "ZWROT W TERMINALU")
+
+# Blokada to kwota zablokowana przez autoryzację kartą, jeszcze nie
+# zaksięgowana — nie ma nawet daty operacji. Później wraca na wyciąg jako
+# zwykła „Płatność kartą”, więc licząc ją razem z wydatkami policzylibyśmy
+# ten sam zakup dwa razy. Pokazujemy ją osobno, zamiast po cichu wyrzucać.
+PKO_TYP_BLOKADA = "BLOKADA"
+KATEGORIA_BLOKADY = "Blokady kartowe"
+
+KOMUNIKAT_PKO_CSV = (
+    "To wygląda na wyciąg PKO w formacie CSV.\n\n"
+    "Dla PKO program czyta pliki XLS — tam nazwa i adres nadawcy stoją\n"
+    "w osobnych kolumnach, a w CSV są wymieszane w jednym polu opisu.\n\n"
+    "Wyeksportuj ten sam okres jeszcze raz i w oknie wyboru formatu\n"
+    "zaznacz XLS zamiast CSV."
+)
+
+# Kolumny wspólnej tabeli, którą zwraca load_transactions niezależnie od banku.
+# Wszystko powyżej tej linii jest bankowe, wszystko poniżej — już nie.
+KOLUMNY_WSPOLNE = ["date", "amount", "desc", "name", "title",
+                   "addr_street", "addr_postal", "addr_city",
+                   "is_client", "is_hold"]
+
+
+def detect_bank(file_path: str) -> str:
+    """Rozpoznaje bank po zawartości pliku.
+
+    Świadomie nie ma ustawienia „wybierz bank”: ustawienie dałoby się
+    przestawić błędnie i wtedy plik nie wczytywałby się bez zrozumiałego
+    powodu, a użytkownik z kontami w dwóch bankach musiałby o nim pamiętać
+    przy każdym wyciągu.
+    """
+    suffix = Path(file_path).suffix.lower()
+
+    if suffix in (".xls", ".xlsx"):
+        try:
+            head = pd.read_excel(file_path, nrows=0)
+        except Exception as exc:
+            raise ValueError(
+                f"Nie udało się otworzyć pliku Excel:\n{exc}"
+            ) from exc
+        columns = [str(c).strip() for c in head.columns]
+        if all(c in columns for c in PKO_KOLUMNY):
+            return BANK_PKO
+        raise ValueError(
+            "Plik Excel nie wygląda na wyciąg PKO — brakuje kolumn "
+            f"{list(PKO_KOLUMNY)}.\n\nZnalezione kolumny: {columns}"
+        )
+
+    # Pliki tekstowe. Markery są czysto ASCII, więc do samego rozpoznania
+    # kodowanie nie ma znaczenia i nie trzeba go zgadywać.
+    with open(file_path, "rb") as f:
+        start = f.read(4096).decode("latin-1")
+
+    if HEADER_MARKER in start:
+        return BANK_MBANK
+    if '"Data operacji","Data waluty"' in start:
+        raise ValueError(KOMUNIKAT_PKO_CSV)
+
+    raise ValueError(
+        "Nie rozpoznano formatu pliku.\n\n"
+        "Program czyta:\n"
+        "  • wyciąg mBank — plik CSV (Lista operacji),\n"
+        "  • wyciąg PKO — plik XLS (Zestawienie operacji).\n\n"
+        "Upewnij się, że plik pochodzi prosto z bankowości internetowej "
+        "i nie był po drodze przerabiany w Excelu."
+    )
+
+
+# ─── Wczytywanie: mBank ────────────────────────────────────────────────────────
+
+def _load_mbank(file_path: str, encoding: str) -> pd.DataFrame:
+    """Wyciąg mBank (CSV) → wspólna tabela operacji."""
     header_row = find_header_row(file_path, encoding)
 
-    df = pd.read_csv(
+    raw = pd.read_csv(
         file_path,
         sep=";",
         encoding=encoding,
@@ -249,58 +358,207 @@ def load_transactions(file_path: str, encoding: str) -> pd.DataFrame:
     )
 
     # Usuwamy zbędne spacje z nazw kolumn
-    df.columns = [c.strip() for c in df.columns]
+    raw.columns = [c.strip() for c in raw.columns]
 
     required = ["#Data operacji", "#Opis operacji", "#Kwota"]
-    missing = [c for c in required if c not in df.columns]
+    missing = [c for c in required if c not in raw.columns]
     if missing:
         raise ValueError(
             f"W pliku nie znaleziono kolumn: {missing}\n"
-            f"Dostępne kolumny: {list(df.columns)}"
+            f"Dostępne kolumny: {list(raw.columns)}"
         )
 
     # Usuwamy puste wiersze
-    df = df.dropna(subset=["#Data operacji", "#Kwota"])
+    raw = raw.dropna(subset=["#Data operacji", "#Kwota"])
 
-    return df
+    desc = raw["#Opis operacji"].astype(str)
+    df = pd.DataFrame(index=raw.index)
+    df["date"]   = raw["#Data operacji"].str.strip()
+    df["amount"] = raw["#Kwota"].apply(parse_kwota)
+    df["desc"]   = desc
+
+    # U mBanku wszystko siedzi w jednym polu opisu, więc kierunek operacji
+    # rozpoznajemy po typie przelewu zapisanym w tym samym tekście.
+    df["is_client"] = (
+        (df["amount"] > 0)
+        & desc.apply(is_incoming)
+        & desc.apply(is_individual)
+    )
+    df["is_hold"] = False              # mBank nie pokazuje blokad na wyciągu
+
+    # Nazwę, tytuł i adres wyciągamy tylko tam, gdzie mają sens — na
+    # pozostałych operacjach (opłaty, karty) dałyby przypadkowe śmieci.
+    df["name"]  = ""
+    df["title"] = ""
+    df["addr_street"] = df["addr_postal"] = df["addr_city"] = ""
+    klienci = df["is_client"]
+    if klienci.any():
+        df.loc[klienci, "name"]  = desc[klienci].apply(extract_name)
+        df.loc[klienci, "title"] = desc[klienci].apply(extract_title)
+        addr = desc[klienci].apply(extract_address)
+        df.loc[klienci, "addr_street"] = addr.apply(lambda t: t[0])
+        df.loc[klienci, "addr_postal"] = addr.apply(lambda t: t[1])
+        df.loc[klienci, "addr_city"]   = addr.apply(lambda t: t[2])
+
+    return df[KOLUMNY_WSPOLNE]
+
+
+# ─── Wczytywanie: PKO ──────────────────────────────────────────────────────────
+
+def _pko_tekst(value) -> str:
+    """Wartość komórki jako tekst. Pusta komórka Excela to NaN — a `str(NaN)`
+    daje słowo „nan”, które wcześniej lądowało w opisach operacji."""
+    if value is None or pd.isna(value):
+        return ""
+    return " ".join(str(value).split())
+
+
+def _pko_etykieta(row, columns, etykieta: str) -> str:
+    """Wyszukuje w wierszu wartość opisaną etykietą, np. „Lokalizacja”.
+
+    PKO wpisuje takie pary do kolumn bez nazwy, a ich kolejność zmienia się
+    zależnie od rodzaju operacji — dlatego szukamy po etykiecie, nie po
+    numerze kolumny.
+    """
+    for c in columns:
+        value = row.get(c)
+        if value is None or pd.isna(value):
+            continue
+        text = str(value).strip()
+        if text.lower().startswith(etykieta.lower()):
+            reszta = text[len(etykieta):].lstrip()
+            if reszta.startswith(":"):
+                return reszta[1:].strip()
+    return ""
+
+
+def _pko_tytul(value) -> str:
+    """Czyści pole „Opis transakcji”: zdejmuje etykietę „Tytuł :” oraz ogon
+    z numerami telefonów, który PKO dokleja przy przelewach na telefon."""
+    if value is None or pd.isna(value):
+        return ""
+    text = " ".join(str(value).split())
+    text = re.sub(r'^Tytu[łl]\s*:\s*', '', text, flags=re.I)
+    text = re.sub(r'\s*OD:\s*\d+\s*DO:\s*\d+\s*$', '', text, flags=re.I)
+    return text.strip()
+
+
+def _pko_data(value) -> str:
+    """Data operacji → tekst „RRRR-MM-DD”. W XLS przychodzi już jako data,
+    ale nie polegamy na tym."""
+    if value is None or pd.isna(value):
+        return ""                      # blokady kartowe nie mają jeszcze daty
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+    return str(value).strip()
+
+
+def _load_pko(file_path: str) -> pd.DataFrame:
+    """Wyciąg PKO (XLS) → wspólna tabela operacji.
+
+    W przeciwieństwie do mBanku nazwa i adres nadawcy przychodzą osobnymi
+    kolumnami, więc nie trzeba ich wyłuskiwać z tekstu.
+    """
+    raw = pd.read_excel(file_path)
+    raw.columns = [str(c).strip() for c in raw.columns]
+
+    missing = [c for c in PKO_KOLUMNY if c not in raw.columns]
+    if missing:
+        raise ValueError(
+            f"W pliku nie znaleziono kolumn: {missing}\n"
+            f"Dostępne kolumny: {list(raw.columns)}"
+        )
+
+    # Filtrujemy tylko po kwocie. Po dacie NIE — bez daty przychodzą blokady
+    # kartowe, a te mają trafić do raportu kontrolnego, nie zniknąć.
+    raw = raw.dropna(subset=["Kwota"])
+    bez_nazwy = [c for c in raw.columns if str(c).startswith("Unnamed")]
+
+    df = pd.DataFrame(index=raw.index)
+    df["date"] = raw["Data operacji"].apply(_pko_data)
+    # Kwota przychodzi liczbą ze znakiem; parse_kwota tylko na wypadek,
+    # gdyby Excel podał ją jako tekst
+    df["amount"] = raw["Kwota"].apply(
+        lambda v: float(v) if isinstance(v, (int, float)) else parse_kwota(str(v))
+    )
+    df["name"]  = raw["Nazwa nadawcy"].fillna("").astype(str).str.strip()
+    df["title"] = raw["Opis transakcji"].apply(_pko_tytul) \
+        if "Opis transakcji" in raw.columns else ""
+
+    typ = raw["Typ transakcji"].fillna("").astype(str).str.strip()
+
+    # Kierunek bierzemy ze ZNAKU KWOTY, nie z typu operacji. U PKO ten sam typ
+    # („Przelew z rachunku”) bywa i wpływem, i wydatkiem, a rdzeń „PRZYCH”
+    # pojawia się tylko w części nazw — na wyciągu testowym złapałby
+    # 2 wpływy z 13.
+    nie_klient = typ.str.upper().apply(
+        lambda t: any(t.startswith(x) for x in PKO_TYPY_NIE_KLIENT)
+    )
+    df["is_hold"] = typ.str.upper().str.startswith(PKO_TYP_BLOKADA)
+    df["is_client"] = (
+        (df["amount"] > 0)
+        & (df["name"] != "")
+        & df["name"].apply(is_individual)
+        & ~nie_klient
+        & ~df["is_hold"]
+    )
+
+    # Adres tylko dla klientów — u pozostałych operacji kolumna dotyczy
+    # odbiorcy albo jest pusta
+    df["addr_street"] = df["addr_postal"] = df["addr_city"] = ""
+    if "Adres nadawcy" in raw.columns:
+        klienci = df["is_client"]
+        if klienci.any():
+            addr = raw.loc[klienci, "Adres nadawcy"].fillna("").astype(str).apply(
+                lambda t: parse_address_text(t, contains_name=False)
+            )
+            df.loc[klienci, "addr_street"] = addr.apply(lambda t: t[0])
+            df.loc[klienci, "addr_postal"] = addr.apply(lambda t: t[1])
+            df.loc[klienci, "addr_city"]   = addr.apply(lambda t: t[2])
+
+    # Opis do raportu kontrolnego: powtarzalny, żeby jednakowe operacje
+    # (np. zakupy w tym samym sklepie) zwijały się do jednego wiersza.
+    # Tytuł pomijamy, gdy jest samym numerem referencyjnym — inaczej każdy
+    # wiersz byłby inny i grupowanie nic by nie dało.
+    def opis(idx) -> str:
+        row = raw.loc[idx]
+        kontrahent = (_pko_tekst(row.get("Nazwa nadawcy"))
+                      or _pko_tekst(row.get("Nazwa odbiorcy"))
+                      or _pko_etykieta(row, bez_nazwy, "Lokalizacja"))
+        tytul = df.at[idx, "title"]
+        if re.fullmatch(r'[\d\s*]*', tytul or ""):
+            tytul = ""
+        czesci = [typ.at[idx], kontrahent, tytul]
+        return " · ".join(c for c in czesci if c)
+
+    df["desc"] = [opis(i) for i in raw.index]
+
+    return df[KOLUMNY_WSPOLNE]
+
+
+# ─── Wczytywanie: wspólne wejście ──────────────────────────────────────────────
+
+def load_transactions(file_path: str, encoding: str) -> pd.DataFrame:
+    """Wczytuje wyciąg dowolnego obsługiwanego banku i zwraca tabelę
+    o stałych kolumnach (KOLUMNY_WSPOLNE). Cała reszta programu — raporty,
+    kontrola kompletności, faktury Saldeo — pracuje już tylko na niej
+    i o bankach nic nie wie."""
+    bank = detect_bank(file_path)
+    if bank == BANK_PKO:
+        return _load_pko(file_path)
+    return _load_mbank(file_path, encoding)
 
 
 def analyze(file_path: str, encoding: str) -> pd.DataFrame:
     """
     Wczytuje wyciąg, filtruje płatności od osób fizycznych,
-    zwraca DataFrame z kolumnami: date, name, amount, title.
+    zwraca DataFrame z kolumnami: date, name, amount, title + adres.
     """
     df = load_transactions(file_path, encoding)
-
-    # Parsujemy kwotę
-    df["amount"] = df["#Kwota"].apply(parse_kwota)
-
-    # Filtr: przychodzące (amount > 0) + słowa kluczowe + nie firma
-    mask = (
-        (df["amount"] > 0)
-        & df["#Opis operacji"].apply(lambda x: is_incoming(str(x)))
-        & df["#Opis operacji"].apply(lambda x: is_individual(str(x)))
-    )
-    df_clients = df[mask].copy()
+    df_clients = df[df["is_client"]].copy()
 
     if df_clients.empty:
         return df_clients
-
-    # Wyodrębniamy nazwę, tytuł i adres
-    df_clients["name"]  = df_clients["#Opis operacji"].apply(
-        lambda x: extract_name(str(x))
-    )
-    df_clients["title"] = df_clients["#Opis operacji"].apply(
-        lambda x: extract_title(str(x))
-    )
-    df_clients["date"]  = df_clients["#Data operacji"].str.strip()
-
-    addr = df_clients["#Opis operacji"].apply(
-        lambda x: extract_address(str(x))
-    )
-    df_clients["addr_street"] = addr.apply(lambda t: t[0])
-    df_clients["addr_postal"] = addr.apply(lambda t: t[1])
-    df_clients["addr_city"]   = addr.apply(lambda t: t[2])
 
     return df_clients[
         ["date", "name", "amount", "title",
@@ -308,17 +566,21 @@ def analyze(file_path: str, encoding: str) -> pd.DataFrame:
     ].reset_index(drop=True)
 
 
-def categorize_transaction(amount: float, desc: str) -> str:
+def categorize_transaction(amount: float, is_client: bool,
+                          is_hold: bool = False) -> str:
     """
     Przypisuje operację do jednej z trzech kategorii:
-      "Klienci"          — wpłata od osoby fizycznej (to, co trafia do df_clients)
+      "Klienci"          — wpłata od osoby fizycznej (to, co trafia na faktury)
       "Pozostałe wpływy" — każdy inny wpływ (od firm, zwroty, odsetki itp.)
       "Wydatki"          — każdy wydatek
+
+    Rozpoznanie klienta robi już wczytywanie wyciągu — każdy bank po swojemu —
+    więc tutaj przychodzi gotową flagą.
     """
+    if is_hold:
+        return KATEGORIA_BLOKADY
     if amount > 0:
-        if is_incoming(desc) and is_individual(desc):
-            return "Klienci"
-        return "Pozostałe wpływy"
+        return "Klienci" if is_client else "Pozostałe wpływy"
     return "Wydatki"
 
 
@@ -353,23 +615,34 @@ def print_reconciliation_report(file_path: str, encoding: str, output_lines: lis
         output_lines.append(line)
 
     df = load_transactions(file_path, encoding)
-    df["amount"] = df["#Kwota"].apply(parse_kwota)
     df["category"] = df.apply(
-        lambda r: categorize_transaction(r["amount"], str(r["#Opis operacji"])),
+        lambda r: categorize_transaction(r["amount"], bool(r["is_client"]),
+                                         bool(r["is_hold"])),
         axis=1,
     )
+    # Blokady trzymamy osobno: nie są jeszcze operacją, więc nie wchodzą
+    # do sum kontrolnych, ale muszą być widoczne
+    blokady = df[df["is_hold"]]
+    df_ops  = df[~df["is_hold"]]
 
     out("═" * 64)
     out("  KONTROLA KOMPLETNOŚCI WYCIĄGU")
     out("═" * 64)
     out()
-    incoming = df[df["amount"] > 0]
-    out(f"  Wszystkich operacji w wyciągu: {len(df)}")
+    incoming = df_ops[df_ops["amount"] > 0]
+    out(f"  Wszystkich operacji w wyciągu: {len(df_ops)}")
     out(f"  Suma wpływów:                  {fmt_amount(incoming['amount'].sum())} PLN"
         f"  ({len(incoming)} operacji)")
-    out(f"  Suma wszystkich operacji:      {fmt_amount(df['amount'].sum())} PLN")
+    out(f"  Suma wszystkich operacji:      {fmt_amount(df_ops['amount'].sum())} PLN")
+    if not blokady.empty:
+        out(f"  Blokady kartowe (poza sumą):   {fmt_amount(blokady['amount'].sum())} PLN"
+            f"  ({len(blokady)} operacji)")
 
-    for category in ("Klienci", "Pozostałe wpływy", "Wydatki"):
+    kategorie = ["Klienci", "Pozostałe wpływy", "Wydatki"]
+    if not blokady.empty:
+        kategorie.append(KATEGORIA_BLOKADY)
+
+    for category in kategorie:
         sub = df[df["category"] == category]
 
         out()
@@ -383,13 +656,13 @@ def print_reconciliation_report(file_path: str, encoding: str, output_lines: lis
             continue
 
         sub = sub.copy()
-        sub["_desc"] = sub["#Opis operacji"].apply(_collapse_desc)
+        sub["_desc"] = sub["desc"].apply(_collapse_desc)
 
         grouped = (
             sub.groupby("_desc", sort=False)
             .agg(n=("amount", "count"),
                  s=("amount", "sum"),
-                 d=("#Data operacji", "first"))
+                 d=("date", "first"))
             .reset_index()
         )
         grouped = grouped.reindex(
@@ -407,7 +680,10 @@ def print_reconciliation_report(file_path: str, encoding: str, output_lines: lis
     out()
     out("═" * 64)
     out(f"  SUMA KONTROLNA (wszystkie operacje):  "
-        f"{fmt_amount(df['amount'].sum())} PLN")
+        f"{fmt_amount(df_ops['amount'].sum())} PLN")
+    if not blokady.empty:
+        out("  (bez blokad kartowych — te nie są jeszcze zaksięgowane")
+        out("   i wrócą na wyciąg jako zwykłe płatności kartą)")
     out("═" * 64)
 
 
