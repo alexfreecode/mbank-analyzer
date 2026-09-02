@@ -34,6 +34,12 @@ DefaultDirName={autopf}\{#MyAppName}
 PrivilegesRequired=lowest
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+; Przy aktualizacji Inno domyślnie odtwarza nazwę grupy zapamiętaną w rejestrze,
+; więc po zmianie nazwy programu folder w menu Start nadal nazywałby się
+; „mBank Analyzer”, choć skróty w środku byłyby już nowe. Ścieżkę instalacji
+; zostawiamy zapamiętaną (inaczej stary folder z plikami zostałby sierotą),
+; ale nazwę grupy bierzemy zawsze z DefaultGroupName.
+UsePreviousGroup=no
 OutputDir=dist
 OutputBaseFilename=Suma Wplat Setup
 SetupIconFile=assets\app.ico
@@ -172,12 +178,16 @@ begin
     LegacyDataDir := ExpandConstant('{userappdata}\{#MyAppLegacyName}');
     if DirExists(AppDataDir) then
     begin
-      if MsgBox(
+      // SuppressibleMsgBox, a nie MsgBox: zwykły MsgBox ignoruje
+      // /SUPPRESSMSGBOXES i przy cichej deinstalacji (/VERYSILENT) program
+      // zawiesza się na tym pytaniu, czekając na kliknięcie, którego nie ma.
+      // Domyślna odpowiedź to IDNO — bez pytania ustawienia zostają.
+      if SuppressibleMsgBox(
         'Czy usunąć również folder z ustawieniami programu?' + #13#10 +
         '(dane sprzedawcy, konfiguracja)' + #13#10#13#10 +
         'Wybierz "Nie", aby zachować ustawienia — przydadzą się' + #13#10 +
         'przy ewentualnej ponownej instalacji.',
-        mbConfirmation, MB_YESNO) = IDYES then
+        mbConfirmation, MB_YESNO, IDNO) = IDYES then
       begin
         DelTree(AppDataDir, True, True, True);
         // Ustawienia zostały skopiowane ze starego folderu, więc kasujemy
