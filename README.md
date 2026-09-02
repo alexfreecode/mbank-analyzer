@@ -50,8 +50,7 @@ jest otwarty — każdy może to zweryfikować.
 
 ## Instalacja
 
-1. Pobierz `Suma.Wplat.Setup.exe` z sekcji
-   [Releases](../../releases/latest).
+1. Pobierz instalator z sekcji [Releases](../../releases/latest).
 2. Uruchom instalator — instalacja nie wymaga uprawnień administratora.
 3. Przy pierwszym uruchomieniu program poprosi o dane sprzedawcy
    (potrzebne tylko do generowania faktur).
