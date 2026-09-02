@@ -12,9 +12,12 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
 # Importujemy logikę analizy i generowania faktur
+from difflib import SequenceMatcher
+
 from parser import analyze, print_report, print_reconciliation_report
 from saldeo_export import VAT_BASIS, generate_saldeo_xlsx
-from contractor_check import load_saldeo_contractors, check_clients
+from contractor_check import (load_saldeo_contractors, check_clients,
+                              _normalize as _normalize_txt, SIMILARITY_THRESHOLD)
 
 # ─── Konfiguracja (zachowywana między uruchomieniami) ─────────────────────────
 
@@ -132,6 +135,42 @@ def secondary_btn(parent, text: str, command, width: int | None = None) -> tk.Bu
     if width is not None:
         kw["width"] = width
     return tk.Button(parent, **kw)
+
+
+def _services_catalog(cfg: dict) -> list[str]:
+    """Słownik usług do wyboru na liście klientów: zapisane usługi plus
+    usługa główna z danych sprzedawcy (żeby zawsze była na liście)."""
+    catalog = list(cfg.get("services_catalog", []))
+    main = (cfg.get("service_name") or "").strip()
+    if main and main not in catalog:
+        catalog.insert(0, main)
+    return catalog
+
+
+# Próg podobieństwa dla nazw usług. Celowo wyższy niż przy kontrahentach
+# (0,84): nazwy usług są dłuższe i różnią się często jednym kluczowym słowem.
+# Pomiar na realnych przykładach: warianty tej samej usługi dają 0,91–1,00
+# („Konsultacje" / „Konsultacja" = 0,909), a różne usługi najwyżej 0,85
+# („Korepetycje z niemieckiego" / „z angielskiego" = 0,846).
+SERVICE_SIMILARITY_THRESHOLD = 0.90
+
+
+def _similar_service(name: str, catalog: list[str]) -> str | None:
+    """Szuka w słowniku usługi podobnej do wpisanej — chroni przed mnożeniem
+    wariantów tej samej usługi („Konsultacja" / „konsultacje" / „Konsultacia").
+
+    Korzysta z tej samej normalizacji, co porównywanie kontrahentów
+    (contractor_check), ale z własnym, ostrzejszym progiem.
+    """
+    norm = _normalize_txt(name)
+    best, best_ratio = None, 0.0
+    for item in catalog:
+        if _normalize_txt(item) == norm:
+            return item                       # to samo, tylko inna pisownia
+        ratio = SequenceMatcher(None, norm, _normalize_txt(item)).ratio()
+        if ratio > best_ratio:
+            best, best_ratio = item, ratio
+    return best if best_ratio >= SERVICE_SIMILARITY_THRESHOLD else None
 
 
 def _icon_path() -> str | None:
@@ -722,6 +761,7 @@ class SaldeoDialog(tk.Toplevel):
 
         self._df = df
         self._client_vars: dict[str, tk.BooleanVar] = {}
+        self._service_vars: dict[str, tk.StringVar] = {}   # usługa per klient
         self._result_path: str | None = None
 
         self._build_ui()
@@ -760,7 +800,20 @@ class SaldeoDialog(tk.Toplevel):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Wypełniamy listę klientów; wcześniej odznaczonych przywracamy z konfiguracji
-        saved_excluded = set(_load_config().get("excluded_clients", []))
+        cfg_list = _load_config()
+        saved_excluded = set(cfg_list.get("excluded_clients", []))
+        saved_services = cfg_list.get("client_services", {})
+        default_service = cfg_list.get("service_name", "Usługa")
+        catalog = _services_catalog(cfg_list)
+
+        # Nagłówek kolumn — bez niego nie widać, po co jest pole obok nazwiska
+        head = tk.Frame(inner, bg="white")
+        head.pack(fill=tk.X, padx=6, pady=(2, 4))
+        tk.Label(head, text="Klient", font=("Segoe UI", 8, "bold"),
+                 bg="white", fg="#666666", width=30, anchor="w").pack(side=tk.LEFT)
+        tk.Label(head, text="Usługa na fakturze", font=("Segoe UI", 8, "bold"),
+                 bg="white", fg="#666666", anchor="w").pack(side=tk.LEFT)
+
         all_clients = sorted(self._df["name"].unique())
         for client in all_clients:
             var = tk.BooleanVar(value=client not in saved_excluded)
@@ -770,7 +823,16 @@ class SaldeoDialog(tk.Toplevel):
             row.pack(fill=tk.X, padx=6, pady=1)
 
             tk.Checkbutton(row, text=client, variable=var,
-                           bg="white", font=FONT_UI, anchor="w").pack(side=tk.LEFT)
+                           bg="white", font=FONT_UI, anchor="w",
+                           width=30).pack(side=tk.LEFT)
+
+            # Usługa dla tego klienta: zapamiętany wybór albo usługa główna.
+            # Combobox jest edytowalny (state="normal") — można wpisać nową
+            # usługę, która po wygenerowaniu trafi do słownika usług.
+            svar = tk.StringVar(value=saved_services.get(client, default_service))
+            self._service_vars[client] = svar
+            ttk.Combobox(row, textvariable=svar, values=catalog,
+                         font=FONT_UI, width=32).pack(side=tk.LEFT, padx=(6, 0))
 
         # Przyciski „Zaznacz wszystko / Odznacz wszystko”
         btn_row = tk.Frame(outer, bg="#f0f0f0")
@@ -912,12 +974,46 @@ class SaldeoDialog(tk.Toplevel):
         contractors_csv = self.contractors_csv_var.get().strip()
         mark_paid = self.mark_paid_var.get()
 
-        # Zapisujemy ustawienia na następne uruchomienie
         cfg = _load_config()
+
+        # ── Usługi wybrane przy klientach ──────────────────────────────────
+        # Wpisaną ręcznie usługę, której nie ma w słowniku, dopisujemy — ale
+        # najpierw sprawdzamy, czy to nie inna pisownia już istniejącej pozycji
+        # (inaczej słownik zapełniłby się wariantami tej samej usługi).
+        catalog = _services_catalog(cfg)
+        selected_services: dict[str, str] = {}
+        for client, svar in self._service_vars.items():
+            if client in excluded:
+                continue
+            service = svar.get().strip()
+            if not service:
+                continue
+            if service not in catalog:
+                similar = _similar_service(service, catalog)
+                if similar and messagebox.askyesno(
+                    "Podobna usługa już istnieje",
+                    f"W słowniku jest już usługa:\n    „{similar}”\n\n"
+                    f"Wpisano:\n    „{service}”\n\n"
+                    "Czy chodziło o tę istniejącą usługę?\n"
+                    "„Nie” doda wpisaną jako nową pozycję słownika.",
+                    parent=self,
+                ):
+                    service = similar
+                    svar.set(similar)
+                else:
+                    catalog.append(service)
+            selected_services[client] = service
+
+        # Zapisujemy ustawienia na następne uruchomienie
         cfg["vat_basis"]               = vat_basis
         cfg["excluded_clients"]        = sorted(excluded)   # odznaczone pola
         cfg["saldeo_contractors_csv"]  = contractors_csv
         cfg["mark_paid"]               = mark_paid
+        cfg["services_catalog"]        = sorted(set(catalog))
+        # Usługi zapamiętujemy per klient — przy kolejnym generowaniu podstawią
+        # się same; wpisy dla klientów spoza tego wyciągu zostawiamy nietknięte
+        cfg["client_services"]         = {**cfg.get("client_services", {}),
+                                          **selected_services}
         _save_config(cfg)
 
         # ── Świeżość bazy kontrahentów: baza w Saldeo zmienia się na bieżąco,
@@ -962,6 +1058,17 @@ class SaldeoDialog(tk.Toplevel):
                     check_results = check_clients(included, contractors)
                     similar = [r for r in check_results if r["status"] == "similar"]
                     new     = [r for r in check_results if r["status"] == "new"]
+                    exact   = [r for r in check_results if r["status"] == "exact"]
+
+                    # Podsumowanie pokazujemy ZAWSZE, także gdy wszystko się
+                    # zgadza. Bez tego przy samych trafieniach okno milczało
+                    # i nie było wiadomo, czy porównanie w ogóle się wykonało.
+                    contractor_warnings.append(
+                        f"Sprawdzono {len(check_results)} klientów z bazą Saldeo "
+                        f"({len(contractors)} kontrahentów): "
+                        f"{len(exact)} dokładnych, {len(similar)} podobnych, "
+                        f"{len(new)} nowych."
+                    )
 
                     # Podejrzanie podobne nazwy — decyzję podejmuje użytkownik:
                     # „czy to ten sam kontrahent?” → jeśli tak, w fakturze
@@ -1010,6 +1117,10 @@ class SaldeoDialog(tk.Toplevel):
                 seller_account=cfg.get("seller_account") or None,
                 service_name=cfg.get("service_name") or None,
                 mark_paid=mark_paid,
+                # Klucze muszą być nazwami PO podmianie z bazy Saldeo —
+                # inaczej przemianowani klienci zgubiliby swoją usługę
+                client_services={name_overrides.get(k, k): v
+                                 for k, v in selected_services.items()},
             )
         except Exception as exc:
             messagebox.showerror("Błąd podczas generowania", str(exc), parent=self)
@@ -1017,9 +1128,17 @@ class SaldeoDialog(tk.Toplevel):
 
         all_warnings = contractor_warnings + warnings
 
+        # Podsumowanie porównania z bazą nie jest ostrzeżeniem, tylko informacją.
+        # Ostrzeżenie (żółty wykrzyknik) pokazujemy dopiero, gdy jest się czym
+        # zająć: duplikaty, nowi kontrahenci, błędy odczytu, różne kwoty wpłat.
+        needs_attention = any(
+            w.lstrip().startswith(("⚠", "ℹ", "✓")) for w in all_warnings
+        )
+
         msg = f"Plik zapisany:\n{out_path}"
         if all_warnings:
-            msg += "\n\nUwagi:\n" + "\n".join(all_warnings)
+            msg += "\n\nSzczegóły:\n" + "\n".join(all_warnings)
+        if needs_attention:
             messagebox.showwarning("Gotowe (z uwagami)", msg, parent=self)
         else:
             messagebox.showinfo("Gotowe", msg, parent=self)

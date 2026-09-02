@@ -121,6 +121,7 @@ def generate_saldeo_xlsx(
     seller_account: str | None = None,
     service_name: str | None = None,
     mark_paid: bool = False,
+    client_services: dict[str, str] | None = None,
 ) -> tuple[str, list[str]]:
     """
     Generuje plik Excel importu faktur dla Saldeo Smart.
@@ -146,6 +147,11 @@ def generate_saldeo_xlsx(
                      None → SELLER_ACCOUNT (stała)
     service_name   : nazwa usługi („Nazwa towaru”);
                      None → SERVICE_NAME (stała)
+    client_services: mapowanie {nazwa_klienta: nazwa_usługi} — pozwala wystawić
+                     różnym klientom faktury za różne usługi. Klucze muszą być
+                     nazwami PO zastosowaniu name_overrides (czyli takimi, jakie
+                     faktycznie trafiają na fakturę). Klient spoza mapowania
+                     dostaje service_name. None → wszyscy dostają service_name.
     mark_paid      : czy wypełnić kolumnę „Zapłacono” kwotą faktury.
                      False (domyślnie) → kolumna pozostaje PUSTA, dzięki czemu
                      po imporcie faktury są w Saldeo nieopłacone i można je
@@ -246,7 +252,10 @@ def generate_saldeo_xlsx(
         row["Miejscowość"]                          = city
         row["Kraj - skrót kraju w formacie ISO"]    = COUNTRY
         row["Waluta"]                               = CURRENCY
-        row["Nazwa towaru"]                         = service_name
+        # Usługa może być inna dla każdego klienta; gdy jej nie wskazano,
+        # wpisujemy usługę główną z danych sprzedawcy
+        row["Nazwa towaru"]                         = (client_services or {}).get(
+            name, service_name)
         row["Ilość"]                                = ilosc
         row["Jednostka"]                            = UNIT
         row["Cena jedn. netto"]                     = cena

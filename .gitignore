@@ -15,11 +15,13 @@ test_run/
 *.log
 *.tmp
 
-# Private marketing notes — never published
+# Private notes — never published
+TODO.md
 marketing_grupy_FB.md
 marketing_reddit.md
 marketing_biura_rachunkowe.md
 marketing_fb_strona.md
+marketing_strona_www.md
 
 # Video assets (script, voiceover, shot list) — marketing, not for repo
 video/
