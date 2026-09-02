@@ -9,7 +9,8 @@ import sys
 import tkinter as tk
 from datetime import date, datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+from tkinter import (filedialog, messagebox, scrolledtext, simpledialog,
+                     ttk)
 
 # Importujemy logikę analizy i generowania faktur
 from difflib import SequenceMatcher
@@ -173,6 +174,154 @@ def _similar_service(name: str, catalog: list[str]) -> str | None:
     return best if best_ratio >= SERVICE_SIMILARITY_THRESHOLD else None
 
 
+def _klienci(n: int) -> str:
+    """Polska odmiana rzeczownika po liczbie — dopełniacz pasuje do „u N
+    klientów" przy każdej liczbie poza jedynką."""
+    return "1 klienta" if n == 1 else f"{n} klientów"
+
+
+class AutocompleteCombobox(ttk.Combobox):
+    """Pole usługi z podpowiedziami: w miarę pisania pod polem pojawia się
+    lista pozycji słownika pasujących do wpisanego tekstu (najpierw te
+    zaczynające się od wpisanego tekstu, potem pozostałe zawierające go).
+
+    Świadomie NIE dopisuje tekstu za użytkownika. Autouzupełnianie „w locie"
+    potrafi po cichu podmienić wpisywaną nazwę — piszesz „Sesja indywidualna",
+    a pole samo robi z tego „Sesja grupowa" i łatwo tego nie zauważyć.
+
+    Podpowiedzi pokazujemy we własnym okienku, a nie w rozwijanej liście
+    Comboboxa: ta po otwarciu przechwytuje klawiaturę i dalsze pisanie
+    trafiałoby do niej zamiast do pola.
+    """
+
+    # Klawisze, po których nie ma sensu przeliczać podpowiedzi — obsługuje je
+    # nawigacja po liście albo sam Combobox
+    _NAV_KEYS = frozenset((
+        "Up", "Down", "Left", "Right", "Return", "Escape", "Tab",
+        "Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R",
+    ))
+
+    def __init__(self, master, catalog: list[str], **kw):
+        super().__init__(master, **kw)
+        self._catalog = list(catalog)
+        self["values"] = self._catalog
+        self._popup: tk.Toplevel | None = None
+        self._listbox: tk.Listbox | None = None
+
+        self.bind("<KeyRelease>", self._on_key_release)
+        self.bind("<FocusOut>",   self._on_focus_out)
+        self.bind("<Escape>",     lambda e: self.hide_popup())
+        self.bind("<Down>",       self._on_down)
+        self.bind("<Up>",         self._on_up)
+        self.bind("<Return>",     self._on_return)
+        self.bind("<<ComboboxSelected>>", lambda e: self.hide_popup())
+
+    # ── Podpowiedzi ────────────────────────────────────────────────────────
+
+    def _on_key_release(self, event):
+        if event.keysym in self._NAV_KEYS:
+            return
+        typed = self.get().strip().lower()
+        if not typed:
+            self.hide_popup()
+            return
+        starts  = [s for s in self._catalog if s.lower().startswith(typed)]
+        rest    = [s for s in self._catalog
+                   if typed in s.lower() and s not in starts]
+        matches = starts + rest
+        # Gdy wpisano dokładnie to, co jest w słowniku, podpowiedź nic nie wnosi
+        if not matches or (len(matches) == 1 and matches[0].lower() == typed):
+            self.hide_popup()
+            return
+        self._show_popup(matches)
+
+    def _show_popup(self, matches: list[str]):
+        if self._popup is None:
+            self._popup = tk.Toplevel(self)
+            self._popup.overrideredirect(True)     # bez ramki i paska tytułu
+            self._popup.attributes("-topmost", True)
+            self._listbox = tk.Listbox(
+                self._popup, font=FONT_UI, activestyle="none", bd=0,
+                highlightthickness=1, highlightbackground="#7a7a7a",
+                selectbackground="#0078d7", selectforeground="white",
+                exportselection=False,
+            )
+            self._listbox.pack(fill=tk.BOTH, expand=True)
+            self._listbox.bind("<Button-1>", self._on_click)
+
+        lb = self._listbox
+        lb.delete(0, tk.END)
+        for item in matches:
+            lb.insert(tk.END, item)
+        lb.configure(height=min(len(matches), 6))
+
+        self.update_idletasks()
+        self._popup.geometry(
+            f"{self.winfo_width()}x{lb.winfo_reqheight()}"
+            f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.winfo_height()}"
+        )
+        self._popup.deiconify()
+        self._popup.lift()
+
+    def hide_popup(self):
+        try:
+            if self._popup is not None:
+                self._popup.withdraw()
+        except tk.TclError:
+            pass                                   # okno już zniknęło
+
+    def _popup_visible(self) -> bool:
+        try:
+            return self._popup is not None and self._popup.winfo_ismapped()
+        except tk.TclError:
+            return False
+
+    def _on_focus_out(self, event):
+        # Kliknięcie w podpowiedź także zabiera fokus polu, więc chowamy listę
+        # z drobnym opóźnieniem — inaczej zniknęłaby przed obsługą kliknięcia
+        self.after(150, self.hide_popup)
+
+    def _accept(self, value: str):
+        self.set(value)
+        self.icursor(tk.END)
+        self.hide_popup()
+
+    # ── Nawigacja klawiaturą ───────────────────────────────────────────────
+
+    def _on_click(self, event):
+        self._accept(self._listbox.get(self._listbox.nearest(event.y)))
+        return "break"
+
+    def _on_down(self, event):
+        if not self._popup_visible():
+            return                                 # zwykłe rozwinięcie listy
+        return self._move(+1)
+
+    def _on_up(self, event):
+        if not self._popup_visible():
+            return
+        return self._move(-1)
+
+    def _move(self, step: int):
+        lb  = self._listbox
+        cur = lb.curselection()
+        idx = 0 if not cur else max(0, min(cur[0] + step, lb.size() - 1))
+        lb.selection_clear(0, tk.END)
+        lb.selection_set(idx)
+        lb.see(idx)
+        return "break"
+
+    def _on_return(self, event):
+        if not self._popup_visible():
+            return
+        cur = self._listbox.curselection()
+        if cur:
+            self._accept(self._listbox.get(cur[0]))
+        else:
+            self.hide_popup()
+        return "break"
+
+
 def _icon_path() -> str | None:
     """Ścieżka do app.ico: w zbudowanym .exe — rozpakowana przez PyInstaller
     do folderu tymczasowego (_MEIPASS), przy uruchomieniu ze źródeł —
@@ -245,6 +394,12 @@ Otwiera on okno, w którym można:
   • zaznaczyć / odznaczyć klientów, dla których mają zostać wystawione faktury
     (przyciski „Zaznacz wszystko” / „Odznacz wszystko” ułatwiają pracę przy
     dłuższych listach — Twój wybór jest zapamiętywany do następnego razu),
+  • ustawić usługę osobno dla każdego klienta — w kolumnie „Usługa na
+    fakturze” obok nazwiska. Podstawia się tam usługa główna z „Dane
+    sprzedawcy”, ale można wybrać inną ze słownika (strzałka rozwija całą
+    listę, a pisanie zawęża podpowiedzi) albo wpisać zupełnie nową.
+    Wybór zapamiętywany jest DLA TEGO KLIENTA i podstawi się następnym razem —
+    patrz punkt 6 poniżej,
   • ustawić numer początkowy faktury („Lp.”),
   • wybrać „Podstawę zastosowania stawki ZW” (a113, a43, a82, du, iz — zgodnie
     z tym, jak rozliczasz zwolnienie z VAT z urzędem skarbowym),
@@ -254,7 +409,7 @@ Otwiera on okno, w którym można:
     jeśli chcesz od razu zaznaczyć je jako opłacone,
   • wskazać plik wynikowy .xlsx,
   • opcjonalnie wskazać bazę kontrahentów Saldeo, by uniknąć duplikatów —
-    patrz punkt 6 poniżej.
+    patrz punkt 7 poniżej.
 
 Po kliknięciu „Generuj” program tworzy plik Excel gotowy do zaimportowania:
 w Saldeo Smart → Faktury → Importuj z pliku.
@@ -283,7 +438,32 @@ każdym kolejnym generowaniu faktur — nie trzeba wpisywać ich za każdym raze
 Nikt poza Tobą nie ma do nich dostępu — nie są nigdzie wysyłane.
 
 
-6. JAK UNIKNĄĆ DUPLIKATÓW KONTRAHENTÓW W SALDEO
+6. SŁOWNIK USŁUG
+─────────────────────────────────────────────────────────────────────────────
+Jedna nazwa usługi na wszystkie faktury wystarcza tylko wtedy, gdy robisz dla
+wszystkich to samo. Dlatego usługę wybiera się osobno przy każdym kliencie
+(punkt 4), a wszystkie użyte nazwy zbierają się w słowniku usług.
+
+Pozycja „Słownik usług” w pasku menu otwiera okno, w którym widać całą listę.
+Przy każdej usłudze pokazane jest, do ilu klientów jest przypisana. Można tu:
+
+  • dodać usługę — wpisz nazwę w polu na dole i kliknij „Dodaj”,
+  • zmienić nazwę — zaznacz pozycję i kliknij „Zmień nazwę” (albo kliknij ją
+    dwukrotnie). Poprawka trafia od razu do wszystkich klientów, którzy tę
+    usługę mają przypisaną,
+  • usunąć usługę — zaznacz i kliknij „Usuń”. Jeśli jest komuś przypisana,
+    program najpierw pokaże listę tych klientów i ostrzeże, że dostaną
+    usługę główną.
+
+Usługi głównej (pogrubionej) nie da się stąd usunąć ani przemianować — należy
+do danych sprzedawcy i zmienia się ją w menu „Dane sprzedawcy”.
+
+Przy wpisywaniu nowej nazwy program porównuje ją z tym, co już jest w słowniku,
+i pyta, jeśli trafi na coś bardzo podobnego („Konsultacja” / „Konsultacje”).
+Chroni to słownik przed mnożeniem wariantów tej samej usługi.
+
+
+7. JAK UNIKNĄĆ DUPLIKATÓW KONTRAHENTÓW W SALDEO
 ─────────────────────────────────────────────────────────────────────────────
 To opcjonalna, ale zalecana funkcja. Chroni przed sytuacją, w której w bazie
 kontrahentów Saldeo z czasem pojawia się wiele kart dla tej samej osoby —
@@ -339,7 +519,7 @@ Jeśli nie wskażesz pliku z bazą kontrahentów — program po prostu pominie t
 krok i będzie działał tak, jak dotychczas.
 
 
-7. NAJCZĘSTSZE PYTANIA
+8. NAJCZĘSTSZE PYTANIA
 ─────────────────────────────────────────────────────────────────────────────
 P: Program pokazuje klienta jako „NIEZNANY” — co to znaczy?
 O: Nie udało się rozpoznać nazwiska nadawcy w opisie operacji. Zdarza się to
@@ -357,7 +537,7 @@ O: Nie. Wszystkie dane — Twoje dane sprzedawcy oraz wczytywane pliki — są
    przesyłane.
 
 
-8. WSPARCIE AUTORA (całkowicie dobrowolne)
+9. WSPARCIE AUTORA (całkowicie dobrowolne)
 ─────────────────────────────────────────────────────────────────────────────
 Program jest darmowy i takim pozostanie — to w żaden sposób się nie zmieni.
 Jeśli jednak zaoszczędził Ci czasu i miał(a)byś ochotę w jakiś sposób
@@ -747,6 +927,236 @@ class ReconciliationDialog(tk.Toplevel):
 
 # ─── Okno „Generowanie faktur Saldeo” ─────────────────────────────────────────
 
+class ServicesDialog(tk.Toplevel):
+    """Słownik usług wpisywanych na fakturach („Nazwa towaru").
+
+    Bez tego okna słownik dało się tylko zapełniać — usługa wpisana w oknie
+    faktur zostawała w nim na zawsze, razem z literówkami i niedokończonymi
+    nazwami. Tutaj można go obejrzeć, dodać pozycję, poprawić nazwę i usunąć
+    zbędną.
+
+    Zmiany zapisywane są od razu po każdej operacji, dlatego okno ma tylko
+    przycisk „Zamknij” — nie ma stanu, który można by zgubić.
+    """
+
+    def __init__(self, parent: tk.Tk):
+        super().__init__(parent)
+        self.transient(parent)
+        self.grab_set()
+
+        self.title("Słownik usług")
+        self.configure(bg="#f0f0f0")
+        self.geometry("580x430")
+        self.minsize(460, 320)
+
+        outer = tk.Frame(self, bg="#f0f0f0", padx=14, pady=12)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(outer,
+                 text="Usługi do wyboru przy klientach w oknie „Faktury Saldeo”:",
+                 font=FONT_UI, bg="#f0f0f0").pack(anchor="w")
+
+        # -- Tabela --
+        table = tk.Frame(outer, bg="#f0f0f0")
+        table.pack(fill=tk.BOTH, expand=True, pady=(4, 6))
+
+        self._tree = ttk.Treeview(table, columns=("usluga", "uzycie"),
+                                  show="headings", selectmode="browse")
+        self._tree.heading("usluga", text="Usługa")
+        self._tree.heading("uzycie", text="Przypisana do")
+        self._tree.column("usluga", width=340, anchor="w")
+        self._tree.column("uzycie", width=140, anchor="w", stretch=False)
+        # Usługa główna wyróżniona — stąd jej nie ruszamy, bo należy
+        # do danych sprzedawcy
+        self._tree.tag_configure("main", font=("Segoe UI", 10, "bold"))
+        self._tree.bind("<Double-1>", lambda e: self._rename())
+
+        tsb = tk.Scrollbar(table, orient=tk.VERTICAL, command=self._tree.yview)
+        self._tree.configure(yscrollcommand=tsb.set)
+        self._tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        tk.Label(outer,
+                 text="Pogrubiona pozycja to usługa główna z „Dane sprzedawcy”.",
+                 font=("Segoe UI", 8), bg="#f0f0f0", fg="#666666",
+                 justify=tk.LEFT).pack(anchor="w", pady=(0, 8))
+
+        # -- Dodawanie --
+        add_row = tk.Frame(outer, bg="#f0f0f0")
+        add_row.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(add_row, text="Nowa usługa:", font=FONT_UI,
+                 bg="#f0f0f0").pack(side=tk.LEFT)
+        self._new_var = tk.StringVar()
+        entry = tk.Entry(add_row, textvariable=self._new_var, font=FONT_UI)
+        entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
+        entry.bind("<Return>", lambda e: self._add())
+        secondary_btn(add_row, "Dodaj", self._add, width=10).pack(side=tk.LEFT)
+
+        # -- Przyciski --
+        btn_row = tk.Frame(outer, bg="#f0f0f0")
+        btn_row.pack(fill=tk.X)
+        secondary_btn(btn_row, "Zmień nazwę", self._rename,
+                      width=14).pack(side=tk.LEFT)
+        secondary_btn(btn_row, "Usuń", self._delete,
+                      width=10).pack(side=tk.LEFT, padx=(6, 0))
+        secondary_btn(btn_row, "Zamknij", self.destroy,
+                      width=12).pack(side=tk.RIGHT)
+
+        self._refresh()
+
+        # Wyśrodkowanie względem okna rodzica
+        self.update_idletasks()
+        pw = parent.winfo_x() + parent.winfo_width()  // 2
+        ph = parent.winfo_y() + parent.winfo_height() // 2
+        self.geometry(f"+{pw - self.winfo_width()//2}+{ph - self.winfo_height()//2}")
+
+        entry.focus_set()
+        self.wait_window()
+
+    # -- Dane ---------------------------------------------------------------
+
+    def _refresh(self, select: str | None = None):
+        """Przerysowuje tabelę na podstawie konfiguracji — po każdej zmianie."""
+        cfg        = _load_config()
+        self._main = (cfg.get("service_name") or "").strip()
+        assigned   = cfg.get("client_services", {})
+
+        self._tree.delete(*self._tree.get_children())
+        for name in _services_catalog(cfg):
+            used = sum(1 for v in assigned.values() if v == name)
+            iid  = self._tree.insert(
+                "", tk.END,
+                values=(name, f"u {_klienci(used)}" if used else "—"),
+                tags=("main",) if name == self._main else (),
+            )
+            if name == select:
+                self._tree.selection_set(iid)
+                self._tree.see(iid)
+
+    def _selected(self) -> str | None:
+        sel = self._tree.selection()
+        if not sel:
+            messagebox.showinfo("Nie wybrano usługi",
+                                "Zaznacz najpierw pozycję na liście.",
+                                parent=self)
+            return None
+        return self._tree.item(sel[0], "values")[0]
+
+    def _block_main(self, name: str) -> bool:
+        """Usługi głównej stąd nie ruszamy: należy do danych sprzedawcy
+        i tak czy owak wróciłaby do słownika przy następnym otwarciu."""
+        if name != self._main:
+            return False
+        messagebox.showinfo(
+            "Usługa główna",
+            f"„{name}” to usługa główna, podstawiana nowym klientom.\n\n"
+            "Można ją zmienić w menu „Dane sprzedawcy”, w polu\n"
+            "„Nazwa usługi (na fakturze)”.",
+            parent=self)
+        return True
+
+    # -- Operacje -----------------------------------------------------------
+
+    def _add(self):
+        name = self._new_var.get().strip()
+        if not name:
+            messagebox.showerror("Pusta nazwa",
+                                 "Wpisz nazwę usługi, którą chcesz dodać.",
+                                 parent=self)
+            return
+
+        cfg     = _load_config()
+        catalog = _services_catalog(cfg)
+        if any(name.lower() == item.lower() for item in catalog):
+            messagebox.showinfo("Usługa już jest w słowniku",
+                                f"„{name}” jest już na liście.", parent=self)
+            return
+
+        # Ta sama ochrona przed wariantami tej samej usługi, co przy
+        # wpisywaniu nazwy w oknie faktur
+        similar = _similar_service(name, catalog)
+        if similar and not messagebox.askyesno(
+            "Podobna usługa już istnieje",
+            f"W słowniku jest już usługa:\n    „{similar}”\n\n"
+            f"Wpisano:\n    „{name}”\n\n"
+            "Dodać mimo to jako osobną pozycję?",
+            parent=self,
+        ):
+            return
+
+        cfg["services_catalog"] = sorted(set(catalog) | {name})
+        _save_config(cfg)
+        self._new_var.set("")
+        self._refresh(select=name)
+
+    def _rename(self):
+        name = self._selected()
+        if name is None or self._block_main(name):
+            return
+
+        new = simpledialog.askstring("Zmiana nazwy usługi",
+                                     "Nowa nazwa usługi:",
+                                     initialvalue=name, parent=self)
+        if new is None:
+            return
+        new = new.strip()
+        if not new or new == name:
+            return
+
+        cfg     = _load_config()
+        catalog = _services_catalog(cfg)
+        if any(new.lower() == item.lower() and item != name for item in catalog):
+            messagebox.showerror("Nazwa zajęta",
+                                 f"Usługa „{new}” jest już w słowniku.",
+                                 parent=self)
+            return
+
+        # Razem z nazwą poprawiamy przypisania klientów — inaczej wskazywałyby
+        # na pozycję, której już nie ma
+        cfg["services_catalog"] = sorted(
+            {new if item == name else item for item in catalog})
+        cfg["client_services"]  = {k: (new if v == name else v)
+                                   for k, v in cfg.get("client_services",
+                                                       {}).items()}
+        _save_config(cfg)
+        self._refresh(select=new)
+
+    def _delete(self):
+        name = self._selected()
+        if name is None or self._block_main(name):
+            return
+
+        cfg      = _load_config()
+        assigned = cfg.get("client_services", {})
+        used     = [k for k, v in assigned.items() if v == name]
+
+        if used:
+            lista = "\n".join(f"    \u2022 {k}" for k in sorted(used)[:10])
+            if len(used) > 10:
+                lista += "\n    \u2022 \u2026"
+            if not messagebox.askyesno(
+                "Usługa jest w użyciu",
+                f"Usługa „{name}” jest przypisana do {_klienci(len(used))}:\n"
+                f"{lista}\n\n"
+                "Po usunięciu ci klienci dostaną usługę główną:\n"
+                f"    „{self._main}”\n\nUsunąć?",
+                icon="warning", parent=self,
+            ):
+                return
+            for k in used:
+                assigned.pop(k, None)
+            cfg["client_services"] = assigned
+        elif not messagebox.askyesno("Usunięcie usługi",
+                                     f"Usunąć „{name}” ze słownika?",
+                                     parent=self):
+            return
+
+        cfg["services_catalog"] = sorted(
+            item for item in _services_catalog(cfg) if item != name)
+        _save_config(cfg)
+        self._refresh()
+
+
 class SaldeoDialog(tk.Toplevel):
     """Modalne okno konfiguracji i generowania pliku Excel importu Saldeo."""
 
@@ -762,6 +1172,7 @@ class SaldeoDialog(tk.Toplevel):
         self._df = df
         self._client_vars: dict[str, tk.BooleanVar] = {}
         self._service_vars: dict[str, tk.StringVar] = {}   # usługa per klient
+        self._service_boxes: list[AutocompleteCombobox] = []
         self._result_path: str | None = None
 
         self._build_ui()
@@ -796,6 +1207,15 @@ class SaldeoDialog(tk.Toplevel):
         canvas.create_window((0, 0), window=inner, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
 
+        # Podpowiedzi usług wyświetlają się w osobnym okienku nad listą, więc
+        # przy przewijaniu zostałyby „w powietrzu” — chowamy je razem z ruchem
+        def _scroll(*args):
+            for box in self._service_boxes:
+                box.hide_popup()
+            canvas.yview(*args)
+
+        scrollbar.configure(command=_scroll)
+
         canvas.pack(side=tk.LEFT,  fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
@@ -810,7 +1230,7 @@ class SaldeoDialog(tk.Toplevel):
         head = tk.Frame(inner, bg="white")
         head.pack(fill=tk.X, padx=6, pady=(2, 4))
         tk.Label(head, text="Klient", font=("Segoe UI", 8, "bold"),
-                 bg="white", fg="#666666", width=30, anchor="w").pack(side=tk.LEFT)
+                 bg="white", fg="#666666", width=26, anchor="w").pack(side=tk.LEFT)
         tk.Label(head, text="Usługa na fakturze", font=("Segoe UI", 8, "bold"),
                  bg="white", fg="#666666", anchor="w").pack(side=tk.LEFT)
 
@@ -824,15 +1244,20 @@ class SaldeoDialog(tk.Toplevel):
 
             tk.Checkbutton(row, text=client, variable=var,
                            bg="white", font=FONT_UI, anchor="w",
-                           width=30).pack(side=tk.LEFT)
+                           width=26).pack(side=tk.LEFT)
 
             # Usługa dla tego klienta: zapamiętany wybór albo usługa główna.
-            # Combobox jest edytowalny (state="normal") — można wpisać nową
-            # usługę, która po wygenerowaniu trafi do słownika usług.
+            # Pole jest edytowalne — można wpisać nową usługę (po wygenerowaniu
+            # trafi do słownika) albo wybrać istniejącą: strzałka rozwija cały
+            # słownik, a pisanie zawęża podpowiedzi do pasujących pozycji.
+            # Szerokości dobrane tak, żeby strzałka mieściła się w oknie —
+            # wcześniej wystawała poza listę i nie dało się jej kliknąć.
             svar = tk.StringVar(value=saved_services.get(client, default_service))
             self._service_vars[client] = svar
-            ttk.Combobox(row, textvariable=svar, values=catalog,
-                         font=FONT_UI, width=32).pack(side=tk.LEFT, padx=(6, 0))
+            box = AutocompleteCombobox(row, catalog, textvariable=svar,
+                                       font=FONT_UI, width=26)
+            box.pack(side=tk.LEFT, padx=(6, 0))
+            self._service_boxes.append(box)
 
         # Przyciski „Zaznacz wszystko / Odznacz wszystko”
         btn_row = tk.Frame(outer, bg="#f0f0f0")
@@ -1193,6 +1618,8 @@ class App(tk.Tk):
         menubar = tk.Menu(self)
         menubar.add_command(label="Dane sprzedawcy",
                             command=self._open_seller_settings)
+        menubar.add_command(label="Słownik usług",
+                            command=self._open_services)
         menubar.add_command(label="Pomoc", command=self._open_help)
         self.config(menu=menubar)
 
@@ -1458,6 +1885,11 @@ class App(tk.Tk):
         """Otwiera okno edycji danych sprzedawcy —
         dostępne w każdej chwili, nie tylko przy pierwszym uruchomieniu."""
         SellerSetupDialog(self, first_run=False)
+
+    def _open_services(self):
+        """Otwiera słownik usług — podgląd i porządki w liście usług,
+        które podpowiadają się przy klientach w oknie faktur."""
+        ServicesDialog(self)
 
     def _open_help(self):
         """Otwiera okno wbudowanej pomocy użytkownika."""
