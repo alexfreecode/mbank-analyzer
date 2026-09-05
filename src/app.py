@@ -5,6 +5,7 @@ Uruchomienie: python app.py  (lub pythonw app.py — bez konsoli)
 
 import json
 import os
+import re
 import shutil
 import sys
 import threading
@@ -118,15 +119,14 @@ RELEASES_API  = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
 RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
 DONATE_URL    = "https://revolut.me/oleksa49b"
 
-# Strona programu. Parametry mtm_* to natywne oznaczenia kampanii w Matomo,
-# którym chodzi statystyka strony — dzięki nim widać, że odwiedzający przyszedł
-# z programu, i z której wersji.
-# Świadomie NIE używamy utm_source/utm_medium/utm_campaign: bez dodatkowej
-# wtyczki Matomo wrzuca je wszystkie do jednego wymiaru „nazwa kampanii”
-# i zamiast dwóch informacji zostaje jedna. Para mtm_campaign + mtm_kwd daje
-# nazwę i słowo kluczowe od razu, w każdej instalacji Matomo.
-WEBSITE_URL   = "https://sumawplat.pl"
-WEBSITE_LINK  = f"{WEBSITE_URL}/?mtm_campaign=program&mtm_kwd={APP_VERSION}"
+# Strona programu — czysty adres, BEZ parametrów kampanii.
+# Były tu wcześniej znaczniki Matomo (skąd przyszedł odwiedzający i z jakiej
+# wersji), ale to zły interes: program obiecuje, że niczego nie wysyła,
+# a użytkownik zobaczyłby w pasku przeglądarki adres z doklejonym śledzeniem.
+# Wygląda jak złamanie obietnicy, choć technicznie nią nie jest. Przy tym
+# sama liczba nic nie zmienia w decyzjach: kto ma program, nie jest nowym
+# odwiedzającym.
+WEBSITE_URL = "https://sumawplat.pl"
 
 FONT_MONO = ("Courier New", 10)
 FONT_UI   = ("Segoe UI", 10)
@@ -191,8 +191,13 @@ def _koloruj_raport(text: tk.Text, report_text: str, theme: dict) -> None:
 
 
 def secondary_btn(parent, text: str, command, width: int | None = None) -> tk.Button:
-    """Jednolity styl przycisków drugorzędnych: płaski, szary, kursor „rączka”.
-    Przyciski główne (kolorowe) pozostają definiowane osobno."""
+    """Jednolity styl WSZYSTKICH przycisków w programie: płaski, szary,
+    kursor „rączka”.
+
+    Wcześniej akcje główne były kolorowe (zielona „Generuj”, niebieska
+    „Uruchom analizę”, fioletowa „Faktury Saldeo”). Kolor nie niósł żadnej
+    informacji, a okna wyglądały jak zlepek. Akcję główną wyróżnia teraz
+    piktogram (▶, ✓) i miejsce w oknie, nie kolor."""
     kw = dict(
         text=text, font=FONT_BTN, command=command,
         relief=tk.FLAT, bg="#e4e4e4", activebackground="#d0d0d0",
@@ -465,6 +470,76 @@ def _fetch_releases(timeout: int = 8) -> list[dict]:
     )
     with urllib.request.urlopen(request, timeout=timeout) as odpowiedz:
         return json.loads(odpowiedz.read().decode("utf-8"))
+
+
+# Nagłówek sekcji ze zmianami w opisie wydania na GitHubie
+_NAGLOWEK_ZMIAN = re.compile(r"^(#{1,6})\s*co\s+nowego", re.IGNORECASE)
+_NAGLOWEK       = re.compile(r"^(#{1,6})\s+")
+
+
+def _uprosc_markdown(tekst: str) -> str:
+    """Zdejmuje najczęstsze znaczniki Markdown.
+
+    Okno pokazuje zwykły tekst, więc gwiazdki i kratki tylko przeszkadzają —
+    „**Odświeżony interfejs:**” ma się czytać jak zdanie, a nie jak kod.
+    """
+    linie = []
+    for linia in tekst.split("\n"):
+        linia = _NAGLOWEK.sub("", linia.rstrip())              # ## Tytuł → Tytuł
+        goła = linia.strip()
+        if len(goła) >= 3 and set(goła) in ({"-"}, {"="}, {"*"}, {"_"}):
+            continue                                           # linia pozioma
+        linia = re.sub(r"^\s*>\s?", "", linia)                 # cytat
+        linia = re.sub(r"^(\s*)[-*+]\s+", r"\1  • ", linia)     # punktor
+        linia = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1: \2", linia)  # odnośnik
+        linia = re.sub(r"\*\*(.+?)\*\*", r"\1", linia)          # pogrubienie
+        linia = re.sub(r"(?<!\w)\*(.+?)\*(?!\w)", r"\1", linia) # kursywa
+        linia = re.sub(r"`([^`]+)`", r"\1", linia)              # kod
+        linie.append(linia)
+
+    # Najwyżej jedna pusta linia z rzędu
+    wynik = []
+    for linia in linie:
+        if not linia.strip() and wynik and not wynik[-1].strip():
+            continue
+        wynik.append(linia)
+    return "\n".join(wynik).strip()
+
+
+def _wyciag_zmian(body: str | None) -> str:
+    """Wyciąga z opisu wydania sekcję „Co nowego”.
+
+    Szukamy po NAGŁÓWKU, a nie po kolejności bloków. Dzięki temu opis wydania
+    na GitHubie może być ułożony dowolnie — najpierw pobieranie, potem zmiany
+    albo odwrotnie — a okno aktualizacji i tak pokaże to, co trzeba. I nie
+    trzeba przepisywać opisów wydań, które już są opublikowane.
+
+    Sekcja kończy się na następnym nagłówku tego samego lub wyższego rzędu.
+    Gdy takiej sekcji nie ma (na przykład w pierwszym wydaniu), pokazujemy
+    całość opisu — lepiej za dużo niż nic.
+    """
+    tekst = (body or "").strip()
+    if not tekst:
+        return ""
+
+    linie = tekst.split("\n")
+    start, poziom = None, 0
+    for i, linia in enumerate(linie):
+        m = _NAGLOWEK_ZMIAN.match(linia.strip())
+        if m:
+            start, poziom = i, len(m.group(1))
+            break
+
+    if start is not None:
+        wybrane = [linie[start]]
+        for linia in linie[start + 1:]:
+            m = _NAGLOWEK.match(linia.strip())
+            if m and len(m.group(1)) <= poziom:
+                break                     # kolejna sekcja tego samego rzędu
+            wybrane.append(linia)
+        tekst = "\n".join(wybrane)
+
+    return _uprosc_markdown(tekst)
 
 
 def _icon_path() -> str | None:
@@ -830,13 +905,9 @@ class SellerSetupDialog(tk.Toplevel):
         btn_row = tk.Frame(outer, bg="#f0f0f0")
         btn_row.pack(pady=(10, 0))
 
-        tk.Button(btn_row,
-                  text=("  Zapisz i kontynuuj  " if first_run else "  Zapisz  "),
-                  font=("Segoe UI", 11, "bold"),
-                  bg="#107c10", fg="white",
-                  activebackground="#0a5b0a", activeforeground="white",
-                  relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
-                  command=self._save).pack(side=tk.LEFT)
+        secondary_btn(btn_row,
+                      "Zapisz i kontynuuj" if first_run else "Zapisz",
+                      self._save).pack(side=tk.LEFT)
 
         if not first_run:
             secondary_btn(btn_row, "Anuluj", self.destroy,
@@ -970,12 +1041,8 @@ class ContractorMatchDialog(tk.Toplevel):
         btn_row = tk.Frame(outer, bg="#f0f0f0")
         btn_row.pack(pady=(14, 0))
 
-        tk.Button(btn_row, text="  Kontynuuj generowanie  ",
-                  font=("Segoe UI", 11, "bold"),
-                  bg="#107c10", fg="white",
-                  activebackground="#0a5b0a", activeforeground="white",
-                  relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
-                  command=self._confirm).pack(side=tk.LEFT)
+        secondary_btn(btn_row, "Kontynuuj generowanie",
+                      self._confirm).pack(side=tk.LEFT)
 
         secondary_btn(btn_row, "Anuluj", self._cancel,
                       width=10).pack(side=tk.LEFT, padx=(10, 0))
@@ -1071,8 +1138,8 @@ class AboutDialog(tk.Toplevel):
                  justify=tk.LEFT).pack(anchor="w", pady=(6, 0))
 
         secondary_btn(outer, "Strona programu (sumawplat.pl)",
-                      lambda: webbrowser.open(WEBSITE_LINK)).pack(anchor="w",
-                                                                  pady=(10, 0))
+                      lambda: webbrowser.open(WEBSITE_URL)).pack(anchor="w",
+                                                                 pady=(10, 0))
 
         tk.Frame(outer, bg="#d0d0d0", height=1).pack(fill=tk.X, pady=12)
 
@@ -1213,7 +1280,7 @@ class AboutDialog(tk.Toplevel):
             naglowek = f"Wersja {tag}" + (f" — {nazwa}" if nazwa and nazwa != tag else "")
             tekst.append(naglowek)
             tekst.append("─" * len(naglowek))
-            opis = (w.get("body") or "").strip()
+            opis = _wyciag_zmian(w.get("body"))
             tekst.append(opis if opis else "(brak opisu zmian)")
             tekst.append("")
 
@@ -1751,13 +1818,8 @@ class SaldeoDialog(tk.Toplevel):
         action_row = tk.Frame(outer, bg="#f0f0f0")
         action_row.pack(pady=(4, 0))
 
-        tk.Button(action_row,
-                  text="  Generuj  ",
-                  font=("Segoe UI", 11, "bold"),
-                  bg="#107c10", fg="white",
-                  activebackground="#0a5b0a", activeforeground="white",
-                  relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
-                  command=self._generate).pack(side=tk.LEFT)
+        secondary_btn(action_row, "Generuj",
+                      self._generate).pack(side=tk.LEFT)
 
         secondary_btn(action_row, "Anuluj", self.destroy,
                       width=10).pack(side=tk.LEFT, padx=(10, 0))
@@ -2092,24 +2154,12 @@ class App(tk.Tk):
         btn_row = tk.Frame(ctrl, bg="#f0f0f0")
         btn_row.grid(row=5, column=0, columnspan=2, pady=(PAD + 4, 0))
 
-        tk.Button(btn_row,
-                  text="  ▶  Uruchom analizę  ",
-                  font=("Segoe UI", 11, "bold"),
-                  bg="#0078d4", fg="white",
-                  activebackground="#005a9e", activeforeground="white",
-                  relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
-                  command=self._run).pack(side=tk.LEFT)
+        secondary_btn(btn_row, "▶  Uruchom analizę",
+                      self._run).pack(side=tk.LEFT)
 
-        self._saldeo_btn = tk.Button(
-            btn_row,
-            text="  Faktury Saldeo  ",
-            font=("Segoe UI", 11),
-            bg="#5c2d91", fg="white",
-            activebackground="#3b1a5e", activeforeground="white",
-            relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
-            state=tk.DISABLED,
-            command=self._open_saldeo_dialog,
-        )
+        self._saldeo_btn = secondary_btn(btn_row, "Faktury Saldeo",
+                                         self._open_saldeo_dialog)
+        self._saldeo_btn.configure(state=tk.DISABLED)
         self._saldeo_btn.pack(side=tk.LEFT, padx=(12, 0))
 
         secondary_btn(btn_row, "  ✓ Kontrola kompletności  ",
