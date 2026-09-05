@@ -15,8 +15,8 @@ import urllib.request
 import webbrowser
 from datetime import date, datetime
 from pathlib import Path
-from tkinter import (filedialog, messagebox, scrolledtext, simpledialog,
-                     ttk)
+from tkinter import (filedialog, font as tkfont, messagebox, scrolledtext,
+                     simpledialog, ttk)
 
 # Importujemy logikę analizy i generowania faktur
 from difflib import SequenceMatcher
@@ -139,22 +139,23 @@ PAD = 10
 # znalazła — bez tego tekstu program przy pierwszym uruchomieniu sprawia
 # wrażenie, że już coś policzył.
 HINT_TITLE = "Zacznij tutaj"
+# Tekst jest krótki nie bez powodu: im mniej wierszy, tym większą czcionką
+# mieści się w polu wyniku, a podpowiedź ma być widoczna z drugiego końca
+# biurka. Wyleciało „co potem” i odesłanie do pomocy — menu i tak jest na
+# wierzchu. Zostały kroki i ostrzeżenie o formacie PKO, czyli jedyna rzecz,
+# która realnie ratuje użytkownika przed nieudanym pierwszym podejściem.
+# Bez pustych wierszy między krokami: każdy usunięty wiersz to większa
+# czcionka. Na tym samym polu ten układ daje Arial 21 zamiast 16 i wypełnia
+# szerokość okna, a numery kroków i tak trzymają strukturę.
 HINT_TEXT = """
 1.  Pobierz z banku listę operacji za miesiąc
-
     mBank: Historia → Eksportuj listę → format CSV
-    PKO BP: Historia → Zrealizowane → na dole strony
-        „Pobierz zestawienie” → format XLS (nie CSV)
-
+    PKO BP: Historia → Zrealizowane → „Pobierz zestawienie”
+        → format XLS, nie CSV
 2.  Kliknij „Wybierz” u góry i wskaż pobrany plik
-
 3.  Kliknij „▶ Uruchom analizę”
 
-
-Tutaj pojawi się wynik: kto, kiedy i ile wpłacił w tym miesiącu.
-Potem jednym kliknięciem zrobisz z tego faktury do Saldeo Smart.
-
-Pierwszy raz? Zajrzyj do menu „Pomoc”.
+Tutaj pojawi się wynik: kto, kiedy i ile wpłacił.
 """
 
 
@@ -2373,6 +2374,40 @@ class App(tk.Tk):
             return
         SaldeoDialog(self, self._df, self.input_var.get().strip())
 
+    # Zakres, w którym dobieramy wielkość podpowiedzi
+    HINT_MIN, HINT_MAX = 11, 22
+
+    def _hint_font_size(self, linie: list[str]) -> int:
+        """Największy rozmiar Arialu, przy którym podpowiedź mieści się
+        w polu wyniku i w pionie, i w poziomie.
+
+        Liczymy, zamiast wpisywać na sztywno: przy innym skalowaniu ekranu
+        albo po zmianie tekstu sztywna liczba albo urwałaby wiersze, albo
+        zostawiła podpowiedź niepotrzebnie małą.
+
+        Rozmiar dobieramy RAZ, pod okno w rozmiarze domyślnym. Po
+        zmaksymalizowaniu okna tekst celowo nie rośnie dalej — podpowiedź
+        ma być czytelna, a nie zajmować cały ekran.
+        """
+        self.result_text.update_idletasks()
+        szer = self.result_text.winfo_width()
+        wys  = self.result_text.winfo_height()
+        if szer < 100 or wys < 100:        # okno jeszcze nieułożone
+            szer, wys = WIN_W - 40, WIN_H - 270
+
+        najdluzsza = max(linie, key=len)
+        wybrany = self.HINT_MIN
+        for rozmiar in range(self.HINT_MIN, self.HINT_MAX + 1):
+            f = tkfont.Font(family="Arial", size=rozmiar)
+            # Zapas na dole: przy wypełnieniu pola co do piksela ostatni
+            # wiersz potrafi się urwać przy innym skalowaniu ekranu
+            if (f.measure(najdluzsza) <= szer - 30
+                    and len(linie) * (f.metrics("linespace") + 3) <= wys - 24):
+                wybrany = rozmiar
+            else:
+                break
+        return wybrany
+
     def _show_hint(self):
         """Wypisuje podpowiedź w pustym polu wyniku.
 
@@ -2382,20 +2417,22 @@ class App(tk.Tk):
         do przeczytania, a nie tabela z liczbami.
         """
         theme = _report_theme()
+        linie = ["", "   " + HINT_TITLE, ""]
+        linie += ["   " + l for l in HINT_TEXT.strip("\n").split("\n")]
+        rozmiar = self._hint_font_size(linie)
+
         self.result_text.configure(state=tk.NORMAL)
         self.result_text.delete("1.0", tk.END)
-        self.result_text.insert("1.0", "\n   " + HINT_TITLE + "\n")
-        for linia in HINT_TEXT.strip("\n").split("\n"):
-            self.result_text.insert(tk.END, "   " + linia + "\n")
+        self.result_text.insert("1.0", "\n".join(linie))
         self.result_text.tag_add("podpowiedz", "1.0", tk.END)
         self.result_text.tag_configure(
-            "podpowiedz", font=("Arial", 11), foreground=theme["podpowiedz"],
-            spacing1=2,
+            "podpowiedz", font=("Arial", rozmiar),
+            foreground=theme["podpowiedz"], spacing1=3,
         )
         # Sam nagłówek mocniej, żeby oko miało od czego zacząć
         self.result_text.tag_add("podpowiedz_tytul", "2.0", "2.end")
         self.result_text.tag_configure(
-            "podpowiedz_tytul", font=("Arial", 12, "bold"),
+            "podpowiedz_tytul", font=("Arial", rozmiar + 2, "bold"),
             foreground=theme["podpowiedz_akcent"],
         )
         self.result_text.configure(state=tk.DISABLED)
