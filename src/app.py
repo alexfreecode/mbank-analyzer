@@ -100,7 +100,10 @@ def _save_config(data: dict) -> None:
 
 # Wersja programu. JEDYNE miejsce, w którym się ją podaje — instalator
 # dostaje ją z build_all.ps1, żeby numery nie mogły się rozjechać.
-APP_VERSION = "1.3"
+# Trzy człony (major.minor.patch): zostawia miejsce na poprawkę bez
+# udawania, że to nowa funkcjonalność — a poprawka jest prawdopodobna,
+# bo obsługę PKO pisaliśmy bez dostępu do prawdziwych wpłat klientów.
+APP_VERSION = "1.3.0"
 
 # Numer wersji w pasku tytułu: użytkownik pisząc „nie działa” zwykle nie wie,
 # co ma zainstalowane, a tutaj widzi to bez szukania. Sama nazwa nie mówi,
@@ -409,16 +412,27 @@ def _default_output_name(df) -> str:
     return "faktury_saldeo.xlsx"
 
 
+# Do ilu członów uzupełniamy numer wersji przy porównywaniu
+_VERSION_PARTS = 4
+
+
 def _parse_version(text: str) -> tuple[int, ...]:
-    """„v1.3” albo „1.3.1” → (1, 3) / (1, 3, 1). Człony nieliczbowe pomijamy,
-    żeby nietypowy tag nie wywalił porównania."""
+    """„v1.3” albo „1.3.1” → (1, 3, 0, 0) / (1, 3, 1, 0).
+
+    Człony nieliczbowe pomijamy, żeby nietypowy tag nie wywalił porównania.
+
+    Krótsze numery dopełniamy zerami, bo inaczej „1.3” wypadłoby MNIEJSZE
+    od „1.3.0” (krótsza krotka sortuje się wcześniej) i program pokazywałby
+    aktualizację do tej samej wersji.
+    """
     czesci = []
     for kawalek in str(text).strip().lstrip("vV").split("."):
         cyfry = "".join(c for c in kawalek if c.isdigit())
         if not cyfry:
             break
         czesci.append(int(cyfry))
-    return tuple(czesci)
+    czesci = czesci[:_VERSION_PARTS]
+    return tuple(czesci + [0] * (_VERSION_PARTS - len(czesci))) if czesci else ()
 
 
 def _fetch_releases(timeout: int = 8) -> list[dict]:
@@ -1054,14 +1068,8 @@ class AboutDialog(tk.Toplevel):
                  font=("Segoe UI", 9), bg="#f0f0f0", fg="#666666",
                  justify=tk.LEFT).pack(anchor="w", pady=(2, 8))
 
-        self._btn_sprawdz = tk.Button(
-            outer, text="  Sprawdź aktualizacje  ",
-            font=("Segoe UI", 10, "bold"),
-            bg="#0078d4", fg="white",
-            activebackground="#005a9e", activeforeground="white",
-            relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
-            command=self._sprawdz,
-        )
+        self._btn_sprawdz = secondary_btn(outer, "Sprawdź aktualizacje",
+                                         self._sprawdz)
         self._btn_sprawdz.pack(anchor="w")
 
         self._wynik = tk.Label(outer, text="", font=FONT_UI, bg="#f0f0f0",
@@ -1077,14 +1085,9 @@ class AboutDialog(tk.Toplevel):
         )
         self._zmiany.pack(fill=tk.BOTH, expand=True)
 
-        self._btn_pobierz = tk.Button(
-            outer, text="  Pobierz najnowszą wersję  ",
-            font=("Segoe UI", 10, "bold"),
-            bg="#107c10", fg="white",
-            activebackground="#0a5b0a", activeforeground="white",
-            relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
-            command=lambda: webbrowser.open(RELEASES_PAGE),
-        )
+        self._btn_pobierz = secondary_btn(
+            outer, "Pobierz najnowszą wersję",
+            lambda: webbrowser.open(RELEASES_PAGE))
 
         tk.Frame(outer, bg="#d0d0d0", height=1).pack(fill=tk.X, pady=12)
 
