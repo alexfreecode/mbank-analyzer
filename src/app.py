@@ -7,7 +7,11 @@ import json
 import os
 import shutil
 import sys
+import threading
 import tkinter as tk
+import urllib.error
+import urllib.request
+import webbrowser
 from datetime import date, datetime
 from pathlib import Path
 from tkinter import (filedialog, messagebox, scrolledtext, simpledialog,
@@ -94,9 +98,23 @@ def _save_config(data: dict) -> None:
 
 # ─── Stałe ────────────────────────────────────────────────────────────────────
 
-# Sama nazwa nie mówi, czego program dotyczy, więc w pasku tytułu
-# zostawiamy też krótki opis. Bez nazwy banku — obsługiwane są dwa.
-TITLE     = f"{APP_NAME} — wpłaty od klientów z wyciągu bankowego"
+# Wersja programu. JEDYNE miejsce, w którym się ją podaje — instalator
+# dostaje ją z build_all.ps1, żeby numery nie mogły się rozjechać.
+APP_VERSION = "1.3"
+
+# Numer wersji w pasku tytułu: użytkownik pisząc „nie działa” zwykle nie wie,
+# co ma zainstalowane, a tutaj widzi to bez szukania. Sama nazwa nie mówi,
+# czego program dotyczy, więc zostaje też krótki opis — bez nazwy banku,
+# bo obsługiwane są dwa.
+TITLE     = f"{APP_NAME} {APP_VERSION} — wpłaty od klientów z wyciągu bankowego"
+
+# Adresy używane w oknie „O programie”. Repozytorium może kiedyś zmienić
+# nazwę; GitHub trzyma wtedy przekierowanie, ale lepiej poprawić tutaj.
+GITHUB_REPO   = "alexfreecode/mbank-analyzer"
+RELEASES_API  = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
+RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
+DONATE_URL    = "https://revolut.me/oleksa49b"
+
 FONT_MONO = ("Courier New", 10)
 FONT_UI   = ("Segoe UI", 10)
 FONT_BTN  = ("Segoe UI", 10)
@@ -391,6 +409,40 @@ def _default_output_name(df) -> str:
     return "faktury_saldeo.xlsx"
 
 
+def _parse_version(text: str) -> tuple[int, ...]:
+    """„v1.3” albo „1.3.1” → (1, 3) / (1, 3, 1). Człony nieliczbowe pomijamy,
+    żeby nietypowy tag nie wywalił porównania."""
+    czesci = []
+    for kawalek in str(text).strip().lstrip("vV").split("."):
+        cyfry = "".join(c for c in kawalek if c.isdigit())
+        if not cyfry:
+            break
+        czesci.append(int(cyfry))
+    return tuple(czesci)
+
+
+def _fetch_releases(timeout: int = 8) -> list[dict]:
+    """Pobiera listę wydań z GitHuba.
+
+    Wywoływane WYŁĄCZNIE po kliknięciu użytkownika w oknie „O programie”.
+    Program nie odzywa się do sieci sam z siebie — to świadoma decyzja:
+    czyta wyciąg bankowy i nie wysyła niczego, dopóki nikt o to nie poprosi.
+    Wysyłamy samo zapytanie GET, bez żadnych danych o użytkowniku.
+    """
+    request = urllib.request.Request(
+        RELEASES_API + "?per_page=20",
+        headers={
+            "Accept": "application/vnd.github+json",
+            # GitHub odrzuca zapytania bez User-Agent.
+            # Nazwa BEZ polskich znaków: nagłówki HTTP muszą dać się zapisać
+            # w latin-1, a „ł” z „Suma Wpłat” wywala całe zapytanie.
+            "User-Agent": f"SumaWplat/{APP_VERSION}",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as odpowiedz:
+        return json.loads(odpowiedz.read().decode("utf-8"))
+
+
 def _icon_path() -> str | None:
     """Ścieżka do app.ico: w zbudowanym .exe — rozpakowana przez PyInstaller
     do folderu tymczasowego (_MEIPASS), przy uruchomieniu ze źródeł —
@@ -629,8 +681,33 @@ O: Nie. Wszystkie dane — Twoje dane sprzedawcy oraz wczytywane pliki — są
    przesyłane.
 
 
-9. WSPARCIE AUTORA (całkowicie dobrowolne)
+9. O PROGRAMIE: WERSJA, AKTUALIZACJE, WSPARCIE AUTORA
 ─────────────────────────────────────────────────────────────────────────────
+Pozycja „O programie” w pasku menu pokazuje numer zainstalowanej wersji
+(widać go też w pasku tytułu okna głównego), pozwala sprawdzić aktualizacje
+i zawiera podziękowanie dla autora.
+
+AKTUALIZACJE
+
+Program NIE łączy się z internetem sam z siebie — ani przy starcie, ani
+w tle. Czyta wyciąg bankowy i nie wysyła nigdzie niczego. Dopiero kliknięcie
+„Sprawdź aktualizacje” wysyła jedno zapytanie do GitHuba o listę wydań.
+Nie idą z nim żadne dane o Tobie ani o Twoim wyciągu.
+
+W odpowiedzi zobaczysz swoją wersję, najnowszą dostępną oraz listę zmian
+między nimi. Program niczego nie pobiera i nie instaluje sam — jeśli
+zdecydujesz się zaktualizować, przycisk otworzy stronę wydań w przeglądarce,
+a resztą kierujesz Ty.
+
+Aktualizacja instaluje się po prostu na wierzchu poprzedniej wersji.
+Ustawienia (dane sprzedawcy, słownik usług) zostają zachowane.
+
+Jeśli komputer nie ma dostępu do internetu albo połączenia blokuje sieć
+firmowa, program po prostu powie, że nie udało się sprawdzić, i będzie
+działać dalej bez żadnej różnicy.
+
+WSPARCIE AUTORA (całkowicie dobrowolne)
+
 Program jest darmowy i takim pozostanie — to w żaden sposób się nie zmieni.
 Jeśli jednak zaoszczędził Ci czasu i miał(a)byś ochotę w jakiś sposób
 podziękować autorowi, możesz wysłać dowolną kwotę (choćby symboliczną,
@@ -922,6 +999,210 @@ class HelpDialog(tk.Toplevel):
         pw = parent.winfo_x() + parent.winfo_width()  // 2
         ph = parent.winfo_y() + parent.winfo_height() // 2
         self.geometry(f"+{pw - self.winfo_width()//2}+{ph - self.winfo_height()//2}")
+
+
+class AboutDialog(tk.Toplevel):
+    """Okno „O programie”: wersja, ręczne sprawdzenie aktualizacji, podziękowanie.
+
+    Sprawdzanie aktualizacji jest CELOWO ręczne. Poza tym oknem program nie
+    łączy się z siecią w ogóle i to jest jego mocna strona: czyta wyciąg
+    bankowy i nie wysyła nigdzie niczego. Automatyczne odpytywanie serwera
+    przy każdym starcie ten argument by osłabiło, a przy okazji zostawiało
+    ślad w logach (adres IP, częstotliwość uruchomień). Tutaj nic się nie
+    dzieje, dopóki użytkownik sam nie kliknie.
+
+    Program niczego też nie pobiera ani nie instaluje sam: pokazuje, co się
+    zmieniło, i otwiera stronę wydania w przeglądarce. Automatyczna
+    aktualizacja niepodpisanego pliku .exe to dokładnie to zachowanie,
+    na które reaguje SmartScreen.
+    """
+
+    def __init__(self, parent: tk.Tk):
+        super().__init__(parent)
+        self.transient(parent)
+        self.grab_set()
+
+        self.title("O programie")
+        self.configure(bg="#f0f0f0")
+        self.resizable(False, False)
+
+        self._sprawdzanie = False
+
+        outer = tk.Frame(self, bg="#f0f0f0", padx=18, pady=16)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        # ── Nagłówek ──
+        tk.Label(outer, text=APP_NAME, font=("Segoe UI", 16, "bold"),
+                 bg="#f0f0f0").pack(anchor="w")
+        tk.Label(outer, text=f"Wersja {APP_VERSION}", font=FONT_UI,
+                 bg="#f0f0f0", fg="#444444").pack(anchor="w")
+        tk.Label(outer,
+                 text="Wpłaty od klientów z wyciągu bankowego,\n"
+                      "gotowe do faktur w Saldeo Smart.",
+                 font=FONT_UI, bg="#f0f0f0", fg="#666666",
+                 justify=tk.LEFT).pack(anchor="w", pady=(6, 0))
+
+        tk.Frame(outer, bg="#d0d0d0", height=1).pack(fill=tk.X, pady=12)
+
+        # ── Aktualizacje ──
+        tk.Label(outer, text="Aktualizacje", font=("Segoe UI", 10, "bold"),
+                 bg="#f0f0f0").pack(anchor="w")
+        tk.Label(outer,
+                 text="Program nie łączy się z internetem sam z siebie.\n"
+                      "Kliknij poniżej, aby jednorazowo zapytać GitHub\n"
+                      "o najnowszą wersję. Nic nie pobiera się automatycznie.",
+                 font=("Segoe UI", 9), bg="#f0f0f0", fg="#666666",
+                 justify=tk.LEFT).pack(anchor="w", pady=(2, 8))
+
+        self._btn_sprawdz = tk.Button(
+            outer, text="  Sprawdź aktualizacje  ",
+            font=("Segoe UI", 10, "bold"),
+            bg="#0078d4", fg="white",
+            activebackground="#005a9e", activeforeground="white",
+            relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
+            command=self._sprawdz,
+        )
+        self._btn_sprawdz.pack(anchor="w")
+
+        self._wynik = tk.Label(outer, text="", font=FONT_UI, bg="#f0f0f0",
+                               justify=tk.LEFT, wraplength=430)
+        self._wynik.pack(anchor="w", pady=(8, 0))
+
+        # Ramka na listę zmian — pojawia się dopiero, gdy jest co pokazać
+        self._zmiany_frame = tk.Frame(outer, bg="#f0f0f0")
+        self._zmiany = scrolledtext.ScrolledText(
+            self._zmiany_frame, font=("Segoe UI", 9), wrap=tk.WORD,
+            height=9, width=54, bg="white", fg="#1e1e1e",
+            relief=tk.SUNKEN, bd=1,
+        )
+        self._zmiany.pack(fill=tk.BOTH, expand=True)
+
+        self._btn_pobierz = tk.Button(
+            outer, text="  Pobierz najnowszą wersję  ",
+            font=("Segoe UI", 10, "bold"),
+            bg="#107c10", fg="white",
+            activebackground="#0a5b0a", activeforeground="white",
+            relief=tk.FLAT, cursor="hand2", padx=8, pady=4,
+            command=lambda: webbrowser.open(RELEASES_PAGE),
+        )
+
+        tk.Frame(outer, bg="#d0d0d0", height=1).pack(fill=tk.X, pady=12)
+
+        # ── Wsparcie autora ──
+        tk.Label(outer, text="Wsparcie autora", font=("Segoe UI", 10, "bold"),
+                 bg="#f0f0f0").pack(anchor="w")
+        tk.Label(outer,
+                 text="Program jest darmowy i taki pozostanie.\n"
+                      "Jeśli oszczędził Ci czasu, możesz podziękować dowolną\n"
+                      "kwotą — choćby symboliczną, „na kawę”. Funkcje programu\n"
+                      "w żaden sposób od tego nie zależą.",
+                 font=("Segoe UI", 9), bg="#f0f0f0", fg="#666666",
+                 justify=tk.LEFT).pack(anchor="w", pady=(2, 8))
+
+        secondary_btn(outer, "☕  Postaw kawę (Revolut)",
+                      lambda: webbrowser.open(DONATE_URL)).pack(anchor="w")
+
+        # ── Zamknięcie ──
+        secondary_btn(outer, "Zamknij", self.destroy,
+                      width=12).pack(anchor="e", pady=(14, 0))
+
+        # Wyśrodkowanie względem okna rodzica
+        self.update_idletasks()
+        pw = parent.winfo_x() + parent.winfo_width()  // 2
+        ph = parent.winfo_y() + parent.winfo_height() // 2
+        self.geometry(f"+{pw - self.winfo_width()//2}+{ph - self.winfo_height()//2}")
+
+        self.wait_window()
+
+    # ── Sprawdzanie aktualizacji ───────────────────────────────────────────
+
+    def _sprawdz(self):
+        if self._sprawdzanie:
+            return
+        self._sprawdzanie = True
+        self._btn_sprawdz.configure(state=tk.DISABLED)
+        self._wynik.configure(text="Sprawdzam…", fg="#444444")
+        self._zmiany_frame.pack_forget()
+        self._btn_pobierz.pack_forget()
+
+        # Sieć w osobnym wątku — inaczej okno zamarza do końca zapytania
+        threading.Thread(target=self._pobierz_w_tle, daemon=True).start()
+
+    def _pobierz_w_tle(self):
+        try:
+            wydania = _fetch_releases()
+            blad = None
+        except urllib.error.URLError as exc:
+            wydania, blad = None, getattr(exc, "reason", exc)
+        except Exception as exc:                    # timeout, zły JSON itd.
+            wydania, blad = None, exc
+        # Do widżetów wracamy wyłącznie w wątku głównym
+        try:
+            if self.winfo_exists():
+                self.after(0, lambda: self._pokaz(wydania, blad))
+        except tk.TclError:
+            pass                                    # okno zamknięto w międzyczasie
+
+    def _pokaz(self, wydania, blad):
+        self._sprawdzanie = False
+        try:
+            self._btn_sprawdz.configure(state=tk.NORMAL)
+        except tk.TclError:
+            return
+
+        if blad is not None:
+            self._wynik.configure(
+                fg="#a80000",
+                text="Nie udało się sprawdzić aktualizacji.\n"
+                     f"({blad})\n\n"
+                     "Sprawdź połączenie z internetem albo zajrzyj na stronę\n"
+                     "wydań ręcznie — program działa dalej normalnie.",
+            )
+            self._btn_pobierz.pack(anchor="w", pady=(8, 0))
+            return
+
+        moja = _parse_version(APP_VERSION)
+        # Wersje robocze i zapowiedzi pomijamy — użytkownikowi pokazujemy
+        # tylko to, co naprawdę wydane
+        gotowe = [w for w in (wydania or [])
+                  if not w.get("draft") and not w.get("prerelease")]
+        nowsze = [w for w in gotowe if _parse_version(w.get("tag_name", "")) > moja]
+
+        if not nowsze:
+            self._wynik.configure(
+                fg="#107c10",
+                text=f"Masz najnowszą wersję ({APP_VERSION}).",
+            )
+            return
+
+        # Od najnowszej do najstarszej
+        nowsze.sort(key=lambda w: _parse_version(w.get("tag_name", "")), reverse=True)
+        najnowsza = nowsze[0].get("tag_name", "").lstrip("vV")
+
+        self._wynik.configure(
+            fg="#0a5b0a",
+            text=f"Masz wersję {APP_VERSION}, najnowsza to {najnowsza}.\n"
+                 f"Co się zmieniło od Twojej wersji:",
+        )
+
+        tekst = []
+        for w in nowsze:
+            tag = w.get("tag_name", "").lstrip("vV")
+            nazwa = (w.get("name") or "").strip()
+            naglowek = f"Wersja {tag}" + (f" — {nazwa}" if nazwa and nazwa != tag else "")
+            tekst.append(naglowek)
+            tekst.append("─" * len(naglowek))
+            opis = (w.get("body") or "").strip()
+            tekst.append(opis if opis else "(brak opisu zmian)")
+            tekst.append("")
+
+        self._zmiany.configure(state=tk.NORMAL)
+        self._zmiany.delete("1.0", tk.END)
+        self._zmiany.insert("1.0", "\n".join(tekst).strip())
+        self._zmiany.configure(state=tk.DISABLED)
+
+        self._zmiany_frame.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+        self._btn_pobierz.pack(anchor="w", pady=(8, 0))
 
 
 # ─── Okno „Kontrola kompletności wyciągu” ─────────────────────────────────────
@@ -1745,6 +2026,7 @@ class App(tk.Tk):
         menubar.add_command(label="Słownik usług",
                             command=self._open_services)
         menubar.add_command(label="Pomoc", command=self._open_help)
+        menubar.add_command(label="O programie", command=self._open_about)
         self.config(menu=menubar)
 
         # ── Panel sterowania (góra) ──
@@ -2023,6 +2305,10 @@ class App(tk.Tk):
     def _open_help(self):
         """Otwiera okno wbudowanej pomocy użytkownika."""
         HelpDialog(self)
+
+    def _open_about(self):
+        """Otwiera okno „O programie” — wersja, aktualizacje, podziękowanie."""
+        AboutDialog(self)
 
 
 # ─── Punkt wejścia ────────────────────────────────────────────────────────────

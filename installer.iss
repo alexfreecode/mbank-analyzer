@@ -12,7 +12,12 @@
 ; obsługą odinstalowania.
 
 #define MyAppName "Suma Wpłat"
-#define MyAppVersion "1.3"
+; Wersje podaje build_all.ps1 przez /DMyAppVersion, czytajac ja z src/app.py —
+; dzieki temu numer w programie i w instalatorze nie moga sie rozjechac.
+; Wartosc ponizej to zapas, gdy ktos kompiluje ten plik recznie.
+#ifndef MyAppVersion
+  #define MyAppVersion "1.3"
+#endif
 ; Neutralna nazwa wydawcy — żadnych danych osobistych w instalatorze
 ; (program ma być swobodnie przekazywalny, bez niczyich danych osobowych)
 #define MyAppPublisher "Suma Wpłat"

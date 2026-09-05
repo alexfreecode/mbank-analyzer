@@ -32,9 +32,19 @@ if (-not $iscc) {
 }
 
 # ── Krok 3: skompilowac instalator ────────────────────────────────────────────
+# Wersje bierzemy z src\app.py - to jedyne zrodlo prawdy. Dzieki temu numer
+# pokazywany w programie i numer w instalatorze nie moga sie rozjechac.
+$appPy = Get-Content (Join-Path $root "src\app.py") -Raw
+if ($appPy -notmatch 'APP_VERSION\s*=\s*"([^"]+)"') {
+    Write-Host "Nie znaleziono APP_VERSION w src\app.py." -ForegroundColor Red
+    exit 1
+}
+$wersja = $Matches[1]
+Write-Host "==> Wersja z src\app.py: $wersja" -ForegroundColor Cyan
+
 Write-Host ""
 Write-Host "==> Buduje instalator przez Inno Setup..." -ForegroundColor Cyan
-& "$iscc" "$root\installer.iss"
+& "$iscc" "/DMyAppVersion=$wersja" (Join-Path $root "installer.iss")
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Kompilacja instalatora zakonczyla sie bledem." -ForegroundColor Red
     exit 1
