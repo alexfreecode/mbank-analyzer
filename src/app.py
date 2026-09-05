@@ -504,6 +504,12 @@ def _fetch_releases(timeout: int = 8) -> list[dict]:
 _NAGLOWEK_ZMIAN = re.compile(r"^(#{1,6})\s*co\s+nowego", re.IGNORECASE)
 _NAGLOWEK       = re.compile(r"^(#{1,6})\s+")
 
+# Ile wydań pokazujemy w całości i ile wierszy z każdego. Kto aktualizuje
+# po roku, dostałby inaczej ścianę tekstu sklejoną z kilku opisów naraz.
+# Reszta jest na stronie wydań i tam po nią odsyłamy.
+MAX_WYDAN_W_OKNIE = 4
+MAX_WIERSZY_NA_WYDANIE = 18
+
 
 def _uprosc_markdown(tekst: str) -> str:
     """Zdejmuje najczęstsze znaczniki Markdown.
@@ -1320,15 +1326,27 @@ class AboutDialog(tk.Toplevel):
         )
 
         tekst = []
-        for w in nowsze:
+        for w in nowsze[:MAX_WYDAN_W_OKNIE]:
             tag = w.get("tag_name", "").lstrip("vV")
             nazwa = (w.get("name") or "").strip()
             naglowek = f"Wersja {tag}" + (f" — {nazwa}" if nazwa and nazwa != tag else "")
             tekst.append(naglowek)
             tekst.append("─" * len(naglowek))
-            opis = _wyciag_zmian(w.get("body"))
-            tekst.append(opis if opis else "(brak opisu zmian)")
+            opis = _wyciag_zmian(w.get("body")) or "(brak opisu zmian)"
+            wiersze = opis.split("\n")
+            if len(wiersze) > MAX_WIERSZY_NA_WYDANIE:
+                wiersze = wiersze[:MAX_WIERSZY_NA_WYDANIE]
+                wiersze.append("   […] dalszy ciąg na stronie wydań")
+            tekst.extend(wiersze)
             tekst.append("")
+
+        # Starsze wydania tylko wymieniamy z nazwy
+        pominiete = nowsze[MAX_WYDAN_W_OKNIE:]
+        if pominiete:
+            numery = ", ".join(w.get("tag_name", "").lstrip("vV")
+                               for w in pominiete)
+            tekst.append(f"Wcześniejsze wersje ({numery}) opisane są "
+                         "na stronie wydań.")
 
         self._zmiany.configure(state=tk.NORMAL)
         self._zmiany.delete("1.0", tk.END)
