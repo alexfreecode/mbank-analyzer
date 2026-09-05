@@ -618,7 +618,9 @@ na jej podstawie faktury do importu w Saldeo.
      ścieżkę w polu „Plik wyjściowy TXT (opcjonalnie)” (krok ten można pominąć).
   3. Sprawdź „Kodowanie pliku” — zwykle właściwe jest „utf-8-sig”; jeżeli polskie
      litery (ą, ę, ś, ż...) wyświetlają się jako „krzaki”, zmień na „cp1250”
-     i uruchom analizę ponownie.
+     i uruchom analizę ponownie. Ustawienie dotyczy wyłącznie plików CSV
+     z mBanku; pliki XLS z PKO niosą kodowanie w sobie i to pole ich
+     nie dotyczy.
   4. Kliknij „▶ Uruchom analizę”. W oknie poniżej pojawi się raport: lista
      wpłat pogrupowana według klientów wraz z sumami miesięcznymi i łączną
      tabelą zbiorczą.
@@ -627,12 +629,14 @@ na jej podstawie faktury do importu w Saldeo.
 3. KONTROLA KOMPLETNOŚCI WYCIĄGU
 ─────────────────────────────────────────────────────────────────────────────
 Przycisk „✓ Kontrola kompletności” tworzy osobny raport, który dzieli
-WSZYSTKIE operacje z wyciągu na trzy grupy:
+WSZYSTKIE operacje z wyciągu na grupy:
 
   • KLIENCI — wpłaty od osób prywatnych (te same, które trafiają do głównego
     raportu i do faktur),
   • POZOSTAŁE WPŁYWY — inne przychody (od firm, zwroty, odsetki itp.),
-  • WYDATKI — wszystkie obciążenia konta.
+  • WYDATKI — wszystkie obciążenia konta,
+  • BLOKADY KARTOWE — tylko w wyciągach PKO i tylko wtedy, gdy jakieś są;
+    szczegóły niżej.
 
 Powtarzające się operacje (np. comiesięczne prowizje bankowe) są zwijane do
 jednego wiersza z liczbą wystąpień i łączną kwotą. Raport kończy SUMA
@@ -646,10 +650,10 @@ w całości do schowka („Kopiuj do schowka”) — np. do wklejenia w e-mailu.
 Wskazówka: przycisk działa niezależnie od głównej analizy — wystarczy, że
 wskazany jest plik z wyciągiem.
 
-W wyciągu PKO trafiają się „blokady kartowe” — kwoty zablokowane przez
-autoryzację karty, jeszcze nie zaksięgowane. Program pokazuje je osobną
-kategorią i NIE wlicza do sum: ta sama płatność wróci później na wyciąg jako
-zwykła operacja kartą i policzyłaby się drugi raz.
+Blokady kartowe to kwoty zablokowane przez autoryzację karty, jeszcze nie
+zaksięgowane — w wyciągu PKO nie mają nawet daty operacji. Program pokazuje
+je osobną kategorią i NIE wlicza do sum kontrolnych: ta sama płatność wróci
+później na wyciąg jako zwykła operacja kartą i policzyłaby się drugi raz.
 
 
 4. GENEROWANIE FAKTUR DLA SALDEO SMART
@@ -803,9 +807,23 @@ O: Saldeo nie przyjmuje zakresu dat w tym polu — program celowo wpisuje datę
    ostatniej wpłaty z danego miesiąca. To zgodne z przyjętą praktyką pracy.
 
 P: Czy moje dane (imię, numer konta) są gdzieś wysyłane?
-O: Nie. Wszystkie dane — Twoje dane sprzedawcy oraz wczytywane pliki — są
-   przetwarzane wyłącznie lokalnie, na Twoim komputerze, i nigdzie nie są
-   przesyłane.
+O: Nie. Wyciąg, dane sprzedawcy i wszystko, co program liczy, zostaje
+   wyłącznie na Twoim komputerze.
+
+P: Czy program łączy się z internetem?
+O: Sam z siebie nigdy — ani przy starcie, ani w tle. Jedyne połączenie
+   powstaje wtedy, gdy sam(a) klikniesz „Sprawdź aktualizacje” w oknie
+   „O programie”: program pyta wtedy GitHub o numer najnowszej wersji.
+   Nie wysyła przy tym niczego o Tobie ani o Twoim wyciągu. Przyciski
+   otwierające stronę programu czy Revolut uruchamiają zwykłą przeglądarkę
+   — to ona łączy się z siecią, nie program.
+
+P: Program otworzył się w innym rozmiarze niż ostatnio — dlaczego?
+O: Rozmiar i położenie okna są zapamiętywane przy zamykaniu. Jeśli okno
+   otworzyło się pośrodku ekranu w domyślnym rozmiarze, to znaczy, że
+   zapamiętane położenie wypadłoby poza obecny ekran — na przykład po
+   odłączeniu drugiego monitora. Program wtedy celowo wraca na środek,
+   żeby okno nie zniknęło poza krawędzią.
 
 
 9. O PROGRAMIE: WERSJA, AKTUALIZACJE, WSPARCIE AUTORA
