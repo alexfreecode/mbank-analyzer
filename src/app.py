@@ -504,6 +504,10 @@ def _fetch_releases(timeout: int = 8) -> list[dict]:
 _NAGLOWEK_ZMIAN = re.compile(r"^(#{1,6})\s*co\s+nowego", re.IGNORECASE)
 _NAGLOWEK       = re.compile(r"^(#{1,6})\s+")
 
+# Wiersz, który w sekcji „Co nowego” pełni rolę podtytułu: nagłówek Markdown
+# albo wiersz w całości pogrubiony („**Odświeżony interfejs:**”).
+_PODTYTUL = re.compile(r"^\s*(?:#{1,6}\s+(.+?)|\*\*(.+?)\*\*)\s*:?\s*$")
+
 # Ile wydań pokazujemy w całości i ile wierszy z każdego. Kto aktualizuje
 # po roku, dostałby inaczej ścianę tekstu sklejoną z kilku opisów naraz.
 # Reszta jest na stronie wydań i tam po nią odsyłamy.
@@ -540,6 +544,34 @@ def _uprosc_markdown(tekst: str) -> str:
     return "\n".join(wynik).strip()
 
 
+def _streszczenie_zmian(sekcja: str) -> str:
+    """Ze zdań w „Co nowego” wyciąga sam szkielet: podtytuły.
+
+    Opis wydania na GitHubie ma się czytać jak tekst, a nie jak lista
+    telegraficznych haseł, więc nie chcemy pisać go dwa razy: raz dla ludzi,
+    raz dla programu. Zamiast tego program bierze z gotowego opisu same
+    podtytuły — one odpowiadają na jedyne pytanie, jakie ma ktoś patrzący
+    w okno aktualizacji: „czy jest tu coś dla mnie”. Po szczegóły klika
+    w stronę wydania.
+
+    Gdy podtytułów nie ma (starsze wydania, krótkie opisy), zwracamy pusty
+    tekst i pokazujemy sekcję w całości.
+    """
+    podtytuly = []
+    for linia in sekcja.split("\n")[1:]:        # pierwszy wiersz to „Co nowego”
+        m = _PODTYTUL.match(linia)
+        if m:
+            # Dwukropek bywa i w środku pogrubienia („**Interfejs:**”)
+            tytul = (m.group(1) or m.group(2) or "").strip().rstrip(":").strip()
+            if tytul:
+                podtytuly.append("  • " + tytul)
+    # Wystarczy jeden: wydanie z jedną zmianą ma jeden podtytuł i to jest
+    # dokładnie ta linia, którą chcemy pokazać. Ryzyko pomyłki jest małe,
+    # bo za podtytuł uznajemy tylko wiersz pogrubiony W CAŁOŚCI albo
+    # nagłówek Markdown, a nie pogrubienie w środku zdania.
+    return "\n".join(podtytuly)
+
+
 def _wyciag_zmian(body: str | None) -> str:
     """Wyciąga z opisu wydania sekcję „Co nowego”.
 
@@ -571,7 +603,11 @@ def _wyciag_zmian(body: str | None) -> str:
             if m and len(m.group(1)) <= poziom:
                 break                     # kolejna sekcja tego samego rzędu
             wybrane.append(linia)
-        tekst = "\n".join(wybrane)
+        sekcja = "\n".join(wybrane)
+        streszczenie = _streszczenie_zmian(sekcja)
+        if streszczenie:
+            return streszczenie
+        tekst = sekcja
 
     return _uprosc_markdown(tekst)
 
