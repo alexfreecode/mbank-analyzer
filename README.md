@@ -42,6 +42,11 @@ Obsługiwane banki: **mBank** (plik CSV) i **PKO BP** (plik XLS).
 - **Wbudowana pomoc** — instrukcja krok po kroku dostępna z poziomu programu
   (menu „Pomoc”).
 
+![Okno programu Suma Wpłat z gotowym raportem wpłat](docs/screenshot.png)
+
+<sub>Raport po analizie wyciągu: klienci, daty i kwoty wpłat, sumy miesięczne.
+Dane na zrzucie są przykładowe.</sub>
+
 ## Prywatność
 
 Program działa **w 100% lokalnie** — żadne dane (Twoje ani Twoich klientów)
