@@ -118,6 +118,16 @@ RELEASES_API  = f"https://api.github.com/repos/{GITHUB_REPO}/releases"
 RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases/latest"
 DONATE_URL    = "https://revolut.me/oleksa49b"
 
+# Strona programu. Parametry mtm_* to natywne oznaczenia kampanii w Matomo,
+# którym chodzi statystyka strony — dzięki nim widać, że odwiedzający przyszedł
+# z programu, i z której wersji.
+# Świadomie NIE używamy utm_source/utm_medium/utm_campaign: bez dodatkowej
+# wtyczki Matomo wrzuca je wszystkie do jednego wymiaru „nazwa kampanii”
+# i zamiast dwóch informacji zostaje jedna. Para mtm_campaign + mtm_kwd daje
+# nazwę i słowo kluczowe od razu, w każdej instalacji Matomo.
+WEBSITE_URL   = "https://sumawplat.pl"
+WEBSITE_LINK  = f"{WEBSITE_URL}/?mtm_campaign=program&mtm_kwd={APP_VERSION}"
+
 FONT_MONO = ("Courier New", 10)
 FONT_UI   = ("Segoe UI", 10)
 FONT_BTN  = ("Segoe UI", 10)
@@ -698,8 +708,12 @@ O: Nie. Wszystkie dane — Twoje dane sprzedawcy oraz wczytywane pliki — są
 9. O PROGRAMIE: WERSJA, AKTUALIZACJE, WSPARCIE AUTORA
 ─────────────────────────────────────────────────────────────────────────────
 Pozycja „O programie” w pasku menu pokazuje numer zainstalowanej wersji
-(widać go też w pasku tytułu okna głównego), pozwala sprawdzić aktualizacje
-i zawiera podziękowanie dla autora.
+(widać go też w pasku tytułu okna głównego), prowadzi na stronę programu
+sumawplat.pl, pozwala sprawdzić aktualizacje i zawiera podziękowanie
+dla autora.
+
+Przycisk ze stroną otwiera zwykłą przeglądarkę — to przeglądarka łączy się
+z internetem, nie program.
 
 AKTUALIZACJE
 
@@ -1055,6 +1069,10 @@ class AboutDialog(tk.Toplevel):
                       "gotowe do faktur w Saldeo Smart.",
                  font=FONT_UI, bg="#f0f0f0", fg="#666666",
                  justify=tk.LEFT).pack(anchor="w", pady=(6, 0))
+
+        secondary_btn(outer, "Strona programu (sumawplat.pl)",
+                      lambda: webbrowser.open(WEBSITE_LINK)).pack(anchor="w",
+                                                                  pady=(10, 0))
 
         tk.Frame(outer, bg="#d0d0d0", height=1).pack(fill=tk.X, pady=12)
 
