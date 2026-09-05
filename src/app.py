@@ -2106,16 +2106,21 @@ class App(tk.Tk):
             except Exception:
                 pass
 
-        # Wyśrodkowanie okna na ekranie
-        self.update_idletasks()
-        x = (self.winfo_screenwidth()  - WIN_W) // 2
-        y = (self.winfo_screenheight() - WIN_H) // 2
-        self.geometry(f"{WIN_W}x{WIN_H}+{x}+{y}")
-
         self._df = None            # wynik ostatniej analizy
         self._last_report = ""     # tekst ostatniego raportu (do przemalowania motywu)
+        # Ostatnia geometria w stanie „normalnym”. Zapamiętujemy ją na bieżąco,
+        # bo po zmaksymalizowaniu okna winfo_geometry() zwraca już rozmiar
+        # pełnoekranowy i nie da się z niego odtworzyć tego sprzed maksymalizacji.
+        self._normal_geometry = ""
+        self._hint_job = None      # zaplanowane przeliczenie podpowiedzi
 
         self._build_ui()
+
+        # Geometrię ustawiamy PO zbudowaniu interfejsu. Zrobiona wcześniej
+        # rozjeżdżała się o wysokość paska menu: okno prosiło o 600 px, a po
+        # dołożeniu menu raportowało 580. Zapisane 580 przy następnym starcie
+        # dawało 560 i okno kurczyło się z każdym uruchomieniem.
+        self._restore_geometry()
 
         # Kreator pierwszego uruchomienia: gdy dane sprzedawcy nie są jeszcze
         # zapisane w config.json — pytamy o nie raz, przed rozpoczęciem pracy.
@@ -2373,6 +2378,119 @@ class App(tk.Tk):
                                 "Najpierw uruchom analizę listy operacji.")
             return
         SaldeoDialog(self, self._df, self.input_var.get().strip())
+
+    # ── Rozmiar i położenie okna między uruchomieniami ─────────────────────
+
+    def _restore_geometry(self):
+        """Przywraca rozmiar i położenie okna z poprzedniego uruchomienia.
+
+        Zapisane położenie sprawdzamy względem obecnego pulpitu: jeśli ktoś
+        odłączył drugi monitor, zapamiętane współrzędne wskazywałyby poza
+        ekran i okno otworzyłoby się niewidoczne. W takim wypadku wracamy
+        na środek.
+        """
+        cfg = _load_config()
+        zapisana = cfg.get("window_geometry") or ""
+        zmaksymalizowane = bool(cfg.get("window_maximized"))
+
+        szer, wys, x, y = WIN_W, WIN_H, None, None
+        m = re.fullmatch(r"(\d+)x(\d+)([+-]\d+)([+-]\d+)", zapisana.strip())
+        if m:
+            szer, wys = int(m.group(1)), int(m.group(2))
+            x, y = int(m.group(3)), int(m.group(4))
+
+        self.update_idletasks()
+        ekran_szer, ekran_wys = self.winfo_screenwidth(), self.winfo_screenheight()
+
+        # Rozmiar nie może przekroczyć ekranu ani zejść poniżej minimum okna
+        szer = max(640, min(szer, ekran_szer))
+        wys  = max(480, min(wys,  ekran_wys))
+
+        # Czy okno zmieściłoby się na widocznym pulpicie? Wymagamy, żeby pasek
+        # tytułu był w zasięgu myszy — inaczej okna nie da się przesunąć.
+        widoczne = (x is not None and y is not None
+                    and x + szer > 60 and x < ekran_szer - 60
+                    and 0 <= y < ekran_wys - 40)
+        if not widoczne:
+            x = (ekran_szer - szer) // 2
+            y = (ekran_wys - wys) // 2
+
+        self.geometry(f"{szer}x{wys}+{x}+{y}")
+        self._normal_geometry = f"{szer}x{wys}+{x}+{y}"
+
+        if zmaksymalizowane:
+            try:
+                self.state("zoomed")
+            except tk.TclError:
+                pass               # nie każdy system to obsługuje
+
+        self.bind("<Configure>", self._remember_geometry)
+        # Zaplanowane przeliczenie podpowiedzi trzeba odwołać przy zamykaniu:
+        # inaczej Tk próbuje wywołać metodę okna, którego już nie ma, i wypisuje
+        # „invalid command name”. W oknie bez konsoli tego nie widać, ale to
+        # nadal błąd, który zaśmieca każde zamknięcie.
+        self.bind("<Destroy>", self._cancel_hint_job, add="+")
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _cancel_hint_job(self, event=None):
+        if event is not None and event.widget is not self:
+            return
+        if self._hint_job is not None:
+            try:
+                self.after_cancel(self._hint_job)
+            except Exception:
+                pass
+            self._hint_job = None
+
+    def _remember_geometry(self, event=None):
+        """Zapisuje w pamięci geometrię, ale tylko gdy okno jest „normalne”.
+
+        Bez tego filtra po zmaksymalizowaniu zapamiętalibyśmy rozmiar pełnego
+        ekranu jako zwykły i po przywróceniu okno zostałoby olbrzymie.
+        """
+        # <Configure> przychodzi także od każdego widżetu w środku — nas
+        # interesuje wyłącznie samo okno
+        if event is not None and event.widget is not self:
+            return
+        try:
+            if self.state() == "normal":
+                self._normal_geometry = self.winfo_geometry()
+        except tk.TclError:
+            pass
+
+        # Podpowiedź przeliczamy dopiero tutaj. Zaraz po ustawieniu geometrii
+        # pole wyniku nie ma jeszcze docelowego rozmiaru (raportuje wartość
+        # sprzed przebudowy) i czcionka wychodziła za mała. Przy okazji
+        # podpowiedź dopasowuje się, gdy ktoś rozciągnie okno myszą.
+        # Odkładamy o chwilę, żeby przy ciągnięciu ramki nie liczyć w kółko.
+        if not self._last_report:
+            if self._hint_job is not None:
+                try:
+                    self.after_cancel(self._hint_job)
+                except Exception:
+                    pass
+            self._hint_job = self.after(120, self._show_hint_if_empty)
+
+    def _show_hint_if_empty(self):
+        """Przerysowuje podpowiedź, o ile okno wciąż istnieje i nie ma raportu."""
+        self._hint_job = None
+        try:
+            if self.winfo_exists() and not self._last_report:
+                self._show_hint()
+        except tk.TclError:
+            pass
+
+    def _on_close(self):
+        """Zapisuje geometrię do config.json i zamyka program."""
+        self._cancel_hint_job()
+        cfg = _load_config()
+        cfg["window_geometry"] = self._normal_geometry or self.winfo_geometry()
+        try:
+            cfg["window_maximized"] = self.state() == "zoomed"
+        except tk.TclError:
+            cfg["window_maximized"] = False
+        _save_config(cfg)
+        self.destroy()
 
     # Zakres, w którym dobieramy wielkość podpowiedzi
     HINT_MIN, HINT_MAX = 11, 26
