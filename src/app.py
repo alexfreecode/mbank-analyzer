@@ -134,6 +134,30 @@ FONT_BTN  = ("Segoe UI", 10)
 WIN_W, WIN_H = 860, 680
 PAD = 10
 
+# Podpowiedź pokazywana w pustym polu wyniku, dopóki nie ma analizy.
+# Puste pole wygląda dokładnie tak samo jak wynik analizy, która nikogo nie
+# znalazła — bez tego tekstu program przy pierwszym uruchomieniu sprawia
+# wrażenie, że już coś policzył.
+HINT_TITLE = "Zacznij tutaj"
+HINT_TEXT = """
+1.  Pobierz z banku listę operacji za miesiąc
+
+    mBank: Historia → Eksportuj listę → format CSV
+    PKO BP: Historia → Zrealizowane → na dole strony
+        „Pobierz zestawienie” → format XLS (nie CSV)
+
+2.  Kliknij „Wybierz” u góry i wskaż pobrany plik
+
+3.  Kliknij „▶ Uruchom analizę”
+
+
+Tutaj pojawi się wynik: kto, kiedy i ile wpłacił w tym miesiącu.
+Potem jednym kliknięciem zrobisz z tego faktury do Saldeo Smart.
+
+Pierwszy raz? Zajrzyj do menu „Pomoc”.
+"""
+
+
 # ─── Motywy raportów (ciemne / jasne tło) ─────────────────────────────────────
 
 REPORT_THEMES = {
@@ -141,11 +165,14 @@ REPORT_THEMES = {
         "bg": "#1e1e1e", "fg": "#d4d4d4", "insert": "white",
         "naglowek": "#ffffff", "klienci": "#5ecf5e", "wplywy": "#58b6f0",
         "wydatki": "#f0705e", "suma": "#ffd75e", "linia": "#5a5a5a",
+        # Podpowiedź w pustym polu — przygaszona, żeby nie udawała wyniku
+        "podpowiedz": "#8a8a8a", "podpowiedz_akcent": "#c8c8c8",
     },
     "light": {
         "bg": "#ffffff", "fg": "#1e1e1e", "insert": "black",
         "naglowek": "#000000", "klienci": "#187a18", "wplywy": "#0b62a4",
         "wydatki": "#c0392b", "suma": "#9a6b00", "linia": "#9a9a9a",
+        "podpowiedz": "#8a8a8a", "podpowiedz_akcent": "#333333",
     },
 }
 
@@ -813,8 +840,8 @@ WSPARCIE AUTORA (całkowicie dobrowolne)
 
 Program jest darmowy i takim pozostanie — to w żaden sposób się nie zmieni.
 Jeśli jednak zaoszczędził Ci czasu i miał(a)byś ochotę w jakiś sposób
-podziękować autorowi, możesz wysłać dowolną kwotę (choćby symboliczną,
-„na kawę”) przez Revolut:
+podziękować autorowi, w oknie „O programie” jest przycisk „Postaw kawę”.
+Otwiera Revolut, gdzie można wysłać dowolną kwotę, choćby symboliczną:
 
     revolut.me/oleksa49b        (RevTag: @oleksa49b)
 
@@ -2187,6 +2214,7 @@ class App(tk.Tk):
             state=tk.DISABLED,
         )
         self.result_text.pack(fill=tk.BOTH, expand=True)
+        self._show_hint()
 
         # Poziomy pasek przewijania
         h_scroll = tk.Scrollbar(result_frame, orient=tk.HORIZONTAL,
@@ -2196,8 +2224,7 @@ class App(tk.Tk):
 
         # ── Pasek stanu ──
         self.status_var = tk.StringVar(
-            value="Wybierz plik z listą operacji i kliknij «Uruchom analizę»"
-                  "   •   ☕ Spodobał się program? → menu „Pomoc”")
+            value="☕ Spodobał się program? → menu „O programie”")
         tk.Label(self, textvariable=self.status_var,
                  font=("Segoe UI", 9), bg="#e0e0e0",
                  anchor="w", padx=PAD, pady=3,
@@ -2346,6 +2373,33 @@ class App(tk.Tk):
             return
         SaldeoDialog(self, self._df, self.input_var.get().strip())
 
+    def _show_hint(self):
+        """Wypisuje podpowiedź w pustym polu wyniku.
+
+        Tekst NIE trafia do self._last_report — inaczej pojechałby do
+        zapisywanego pliku i do schowka, i wracałby przy przełączeniu motywu
+        już po analizie. Czcionka proporcjonalna, nie monospace: to zdania
+        do przeczytania, a nie tabela z liczbami.
+        """
+        theme = _report_theme()
+        self.result_text.configure(state=tk.NORMAL)
+        self.result_text.delete("1.0", tk.END)
+        self.result_text.insert("1.0", "\n   " + HINT_TITLE + "\n")
+        for linia in HINT_TEXT.strip("\n").split("\n"):
+            self.result_text.insert(tk.END, "   " + linia + "\n")
+        self.result_text.tag_add("podpowiedz", "1.0", tk.END)
+        self.result_text.tag_configure(
+            "podpowiedz", font=("Arial", 11), foreground=theme["podpowiedz"],
+            spacing1=2,
+        )
+        # Sam nagłówek mocniej, żeby oko miało od czego zacząć
+        self.result_text.tag_add("podpowiedz_tytul", "2.0", "2.end")
+        self.result_text.tag_configure(
+            "podpowiedz_tytul", font=("Arial", 12, "bold"),
+            foreground=theme["podpowiedz_akcent"],
+        )
+        self.result_text.configure(state=tk.DISABLED)
+
     def apply_report_theme(self):
         """Przemalowuje pole wyniku na aktualny motyw — wywoływane od razu
         po przełączeniu tła w ustawieniach (natychmiastowy podgląd),
@@ -2357,6 +2411,8 @@ class App(tk.Tk):
             self.result_text.configure(state=tk.NORMAL)
             _koloruj_raport(self.result_text, self._last_report, theme)
             self.result_text.configure(state=tk.DISABLED)
+        else:
+            self._show_hint()          # jeszcze nie było analizy
         # Przemaluj także otwarte okna „Kontrola kompletności" — bez tego
         # zostawałyby w starym motywie i wyglądało to na błąd
         for child in self.winfo_children():
