@@ -138,7 +138,7 @@ PAD = 10
 # Puste pole wygląda dokładnie tak samo jak wynik analizy, która nikogo nie
 # znalazła — bez tego tekstu program przy pierwszym uruchomieniu sprawia
 # wrażenie, że już coś policzył.
-HINT_TITLE = "Zacznij tutaj"
+HINT_TITLE = "Podpowiedź"
 # Tekst jest krótki nie bez powodu: im mniej wierszy, tym większą czcionką
 # mieści się w polu wyniku, a podpowiedź ma być widoczna z drugiego końca
 # biurka. Wyleciało „co potem” i odesłanie do pomocy — menu i tak jest na
@@ -2375,7 +2375,24 @@ class App(tk.Tk):
         SaldeoDialog(self, self._df, self.input_var.get().strip())
 
     # Zakres, w którym dobieramy wielkość podpowiedzi
-    HINT_MIN, HINT_MAX = 11, 22
+    HINT_MIN, HINT_MAX = 11, 26
+    # O tyle punktów nagłówek jest większy od treści
+    HINT_TITLE_BONUS = 3
+    # Odstęp pod nagłówkiem i między wierszami treści (piksele)
+    HINT_GAP, HINT_SPACING = 10, 3
+
+    def _hint_height(self, rozmiar: int, wierszy: int) -> int:
+        """Wysokość całej podpowiedzi w pikselach przy danym rozmiarze.
+
+        Liczona osobno dla nagłówka i treści, bo nagłówek jest większy
+        i ma pod sobą odstęp — wspólny wzór zaniżałby wynik i ostatni
+        wiersz wychodziłby poza pole.
+        """
+        naglowek = tkfont.Font(family="Arial", size=rozmiar + self.HINT_TITLE_BONUS,
+                               weight="bold")
+        tresc = tkfont.Font(family="Arial", size=rozmiar)
+        return (naglowek.metrics("linespace") + self.HINT_GAP
+                + wierszy * (tresc.metrics("linespace") + self.HINT_SPACING))
 
     def _hint_font_size(self, linie: list[str]) -> int:
         """Największy rozmiar Arialu, przy którym podpowiedź mieści się
@@ -2399,10 +2416,8 @@ class App(tk.Tk):
         wybrany = self.HINT_MIN
         for rozmiar in range(self.HINT_MIN, self.HINT_MAX + 1):
             f = tkfont.Font(family="Arial", size=rozmiar)
-            # Zapas na dole: przy wypełnieniu pola co do piksela ostatni
-            # wiersz potrafi się urwać przy innym skalowaniu ekranu
             if (f.measure(najdluzsza) <= szer - 30
-                    and len(linie) * (f.metrics("linespace") + 3) <= wys - 24):
+                    and self._hint_height(rozmiar, len(linie)) <= wys - 16):
                 wybrany = rozmiar
             else:
                 break
@@ -2417,23 +2432,27 @@ class App(tk.Tk):
         do przeczytania, a nie tabela z liczbami.
         """
         theme = _report_theme()
-        linie = ["", "   " + HINT_TITLE, ""]
-        linie += ["   " + l for l in HINT_TEXT.strip("\n").split("\n")]
-        rozmiar = self._hint_font_size(linie)
+        tresc = ["   " + l for l in HINT_TEXT.strip("\n").split("\n")]
+        rozmiar = self._hint_font_size(tresc)
 
         self.result_text.configure(state=tk.NORMAL)
         self.result_text.delete("1.0", tk.END)
-        self.result_text.insert("1.0", "\n".join(linie))
-        self.result_text.tag_add("podpowiedz", "1.0", tk.END)
+        # Nagłówek w pierwszym wierszu — bez pustego wiersza nad nim,
+        # żeby nie tracić wysokości, z której rośnie czcionka
+        self.result_text.insert("1.0", HINT_TITLE + "\n" + "\n".join(tresc))
+
+        self.result_text.tag_add("podpowiedz", "2.0", tk.END)
         self.result_text.tag_configure(
             "podpowiedz", font=("Arial", rozmiar),
-            foreground=theme["podpowiedz"], spacing1=3,
+            foreground=theme["podpowiedz"], spacing1=self.HINT_SPACING,
         )
-        # Sam nagłówek mocniej, żeby oko miało od czego zacząć
-        self.result_text.tag_add("podpowiedz_tytul", "2.0", "2.end")
+        # Nagłówek: wyśrodkowany, mocniejszy, z odstępem pod spodem
+        self.result_text.tag_add("podpowiedz_tytul", "1.0", "1.end")
         self.result_text.tag_configure(
-            "podpowiedz_tytul", font=("Arial", rozmiar + 2, "bold"),
+            "podpowiedz_tytul",
+            font=("Arial", rozmiar + self.HINT_TITLE_BONUS, "bold"),
             foreground=theme["podpowiedz_akcent"],
+            justify=tk.CENTER, spacing3=self.HINT_GAP,
         )
         self.result_text.configure(state=tk.DISABLED)
 
